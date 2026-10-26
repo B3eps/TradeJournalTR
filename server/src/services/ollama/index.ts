@@ -10,7 +10,7 @@ import path from 'node:path';
 import { getDb } from '../../db/connection';
 import * as newsDb from '../../db/news-items';
 import { getSetting, setSetting, listSettingsByKey } from '../../db/settings';
-import { EVALUATION_SAFETY_RULE_TR, buildAskPrompt, sanitizeEvaluation, type Evaluation } from '../newsfeed/evaluation';
+import { EVALUATION_SAFETY_RULE_TR, buildAskPrompt, evaluationInputSchema, sanitizeEvaluation, type Evaluation } from '../newsfeed/evaluation';
 import { NEWS_EVAL_DIR } from '../newsfeed';
 import { IntegrationError, bad, fetchWithTimeout, normalizeBaseUrl, optBool, intInRange } from '../ntfy/http';
 
@@ -168,11 +168,18 @@ export function parseModelJson(text: string): unknown {
 
 /** Sanitizer + local-AI policy: low confidence, warning prefix. */
 export function finalizeLocalEvaluation(raw: unknown, id: string, now = new Date()): Evaluation | null {
-  const ev = sanitizeEvaluation(raw, id, now);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.id !== undefined && candidate.id !== id) return null;
+  const parsed = evaluationInputSchema.safeParse({
+    ...candidate,
+    id,
+    evaluatedAt: now.toISOString(),
+    guven: 'düşük',
+  });
+  if (!parsed.success) return null;
+  const ev = sanitizeEvaluation(parsed.data, id, now);
   if (!ev) return null;
-  ev.id = id;
-  ev.evaluatedAt = now.toISOString();
-  ev.guven = 'düşük';
   ev.uyari = ev.uyari ? `${LOCAL_AI_WARNING} ${ev.uyari}`.slice(0, 300) : LOCAL_AI_WARNING;
   if (!ev.ozet && !ev.etkilenen.length && !ev.senaryolar.length) return null;
   return ev;
