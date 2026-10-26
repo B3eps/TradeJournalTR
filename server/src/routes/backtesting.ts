@@ -19,7 +19,7 @@ backtesting.get('/api/backtesting/sessions', requiresLogin, async (c) => {
     return c.json({ sessions });
   } catch (err) {
     console.error('getSessions error:', err);
-    return c.json({ error: 'Failed to fetch sessions' }, 500);
+    return c.json({ error: 'Test oturumları alınamadı.' }, 500);
   }
 });
 
@@ -31,7 +31,7 @@ backtesting.post('/api/backtesting/sessions', requiresLogin, async (c) => {
   const { name, ticker, startDate } = body;
 
   if (!ticker || !startDate) {
-    return c.json({ error: 'ticker and startDate are required' }, 400);
+    return c.json({ error: 'Sembol ve başlangıç tarihi zorunludur.' }, 400);
   }
 
   try {
@@ -39,7 +39,7 @@ backtesting.post('/api/backtesting/sessions', requiresLogin, async (c) => {
     return c.json(session);
   } catch (err) {
     console.error('createSession error:', err);
-    return c.json({ error: 'Failed to create session' }, 500);
+    return c.json({ error: 'Test oturumu oluşturulamadı.' }, 500);
   }
 });
 
@@ -52,7 +52,7 @@ backtesting.post('/api/backtesting/sessions/:id/end', requiresLogin, async (c) =
   const { endDate } = body;
 
   if (!endDate) {
-    return c.json({ error: 'endDate is required' }, 400);
+    return c.json({ error: 'Bitiş tarihi zorunludur.' }, 400);
   }
 
   try {
@@ -60,7 +60,7 @@ backtesting.post('/api/backtesting/sessions/:id/end', requiresLogin, async (c) =
     return c.json(session);
   } catch (err) {
     console.error('endSession error:', err);
-    return c.json({ error: 'Failed to end session' }, 500);
+    return c.json({ error: 'Test oturumu bitirilemedi.' }, 500);
   }
 });
 
@@ -75,7 +75,7 @@ backtesting.post('/api/backtesting/sessions/:id/continue', requiresLogin, async 
     return c.json(session);
   } catch (err) {
     console.error('continueSession error:', err);
-    return c.json({ error: 'Failed to continue session' }, 500);
+    return c.json({ error: 'Test oturumu sürdürülemedi.' }, 500);
   }
 });
 
@@ -87,10 +87,10 @@ backtesting.delete('/api/backtesting/sessions/:id', requiresLogin, async (c) => 
 
   try {
     await backtestingDb.deleteSession(db, user.id, sessionId);
-    return c.json({ message: 'Session deleted' });
+    return c.json({ message: 'Test oturumu silindi.' });
   } catch (err) {
     console.error('deleteSession error:', err);
-    return c.json({ error: 'Failed to delete session' }, 500);
+    return c.json({ error: 'Test oturumu silinemedi.' }, 500);
   }
 });
 
@@ -105,7 +105,7 @@ backtesting.get('/api/backtesting/sessions/:id/trades', requiresLogin, async (c)
     return c.json({ trades });
   } catch (err) {
     console.error('getTradesForSession error:', err);
-    return c.json({ error: 'Failed to fetch trades' }, 500);
+    return c.json({ error: 'Test işlemleri alınamadı.' }, 500);
   }
 });
 
@@ -119,7 +119,7 @@ backtesting.get('/api/backtesting/trades', requiresLogin, async (c) => {
     return c.json({ trades });
   } catch (err) {
     console.error('getTrades error:', err);
-    return c.json({ error: 'Failed to fetch trades' }, 500);
+    return c.json({ error: 'Test işlemleri alınamadı.' }, 500);
   }
 });
 
@@ -131,10 +131,10 @@ backtesting.post('/api/backtesting/trades', requiresLogin, async (c) => {
   const { sessionId, result, profitFactor, timeOfDay } = body;
 
   if (!sessionId || !result || profitFactor == null || !timeOfDay) {
-    return c.json({ error: 'sessionId, result, profitFactor, and timeOfDay are required' }, 400);
+    return c.json({ error: 'Oturum, sonuç, kâr faktörü ve günün saati zorunludur.' }, 400);
   }
   if (result !== 'win' && result !== 'loss') {
-    return c.json({ error: 'result must be "win" or "loss"' }, 400);
+    return c.json({ error: 'Sonuç "win" veya "loss" olmalıdır.' }, 400);
   }
 
   try {
@@ -142,7 +142,7 @@ backtesting.post('/api/backtesting/trades', requiresLogin, async (c) => {
     return c.json(trade);
   } catch (err) {
     console.error('addTrade error:', err);
-    return c.json({ error: 'Failed to add trade' }, 500);
+    return c.json({ error: 'Test işlemi eklenemedi.' }, 500);
   }
 });
 
@@ -154,10 +154,10 @@ backtesting.delete('/api/backtesting/trades/:id', requiresLogin, async (c) => {
 
   try {
     await backtestingDb.deleteTrade(db, user.id, tradeId);
-    return c.json({ message: 'Trade deleted' });
+    return c.json({ message: 'Test işlemi silindi.' });
   } catch (err) {
     console.error('deleteTrade error:', err);
-    return c.json({ error: 'Failed to delete trade' }, 500);
+    return c.json({ error: 'Test işlemi silinemedi.' }, 500);
   }
 });
 

@@ -19,7 +19,7 @@ dailyNote.get('/api/getDailyNotes', requiresLogin, async (c) => {
     return c.json({ notes });
   } catch (err) {
     console.error('getDailyNotes error:', err);
-    return c.json({ error: 'Failed to fetch notes' }, 500);
+    return c.json({ error: 'Günlük notlar alınamadı.' }, 500);
   }
 });
 
@@ -31,7 +31,7 @@ dailyNote.post('/api/saveDailyNote', requiresLogin, async (c) => {
   const { date, content } = body;
 
   if (!date || !content) {
-    return c.json({ error: 'Date and content are required' }, 400);
+    return c.json({ error: 'Tarih ve not içeriği zorunludur.' }, 400);
   }
 
   try {
@@ -39,7 +39,7 @@ dailyNote.post('/api/saveDailyNote', requiresLogin, async (c) => {
     return c.json(result);
   } catch (err) {
     console.error('saveDailyNote error:', err);
-    return c.json({ error: 'Failed to save note' }, 500);
+    return c.json({ error: 'Günlük not kaydedilemedi.' }, 500);
   }
 });
 
@@ -51,15 +51,15 @@ dailyNote.post('/api/removeDailyNote', requiresLogin, async (c) => {
   const { date } = body;
 
   if (!date) {
-    return c.json({ error: 'Date is required' }, 400);
+    return c.json({ error: 'Tarih zorunludur.' }, 400);
   }
 
   try {
     await dailyNotesDb.deleteDailyNote(db, user.id, date);
-    return c.json({ message: 'Note deleted' });
+    return c.json({ message: 'Günlük not silindi.' });
   } catch (err) {
     console.error('removeDailyNote error:', err);
-    return c.json({ error: 'Failed to delete note' }, 500);
+    return c.json({ error: 'Günlük not silinemedi.' }, 500);
   }
 });
 

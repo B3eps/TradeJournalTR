@@ -40,20 +40,20 @@ uploads.post('/api/uploads', requiresLogin, async (c) => {
     const body = await c.req.parseBody();
     file = body['file'];
   } catch {
-    return c.json({ error: 'Invalid multipart form data.' }, 400);
+    return c.json({ error: 'Görsel yükleme isteği okunamadı.' }, 400);
   }
 
   if (!(file instanceof File)) {
-    return c.json({ error: 'A `file` field is required.' }, 400);
+    return c.json({ error: 'Yüklenecek görsel dosyası bulunamadı.' }, 400);
   }
 
   const ext = MIME_EXTENSIONS[file.type];
   if (!ext) {
-    return c.json({ error: 'Only image uploads are allowed.' }, 400);
+    return c.json({ error: 'Yalnızca görsel dosyaları yüklenebilir.' }, 400);
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    return c.json({ error: 'File too large (max 10MB).' }, 400);
+    return c.json({ error: 'Görsel en fazla 10 MB olabilir.' }, 400);
   }
 
   const name = `${generateId()}.${ext}`;
