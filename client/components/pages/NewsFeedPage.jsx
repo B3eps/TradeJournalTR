@@ -199,6 +199,7 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluat
   const [evaluationText, setEvaluationText] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const imp = IMPORTANCE_STYLE[item.importance] || IMPORTANCE_STYLE[0];
   const ts = new Date(item.publishedAt).getTime();
   const tsValid = !isNaN(ts);
@@ -293,34 +294,55 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluat
               {askingId === item.id ? 'Hazırlanıyor…' : 'ChatGPT istemini kopyala'}
             </button>
           </div>
-          <label className="block text-xs text-text-tertiary" htmlFor={`news-eval-${item.id}`}>ChatGPT JSON yanıtı</label>
-          <textarea
-            id={`news-eval-${item.id}`}
-            value={evaluationText}
-            onChange={(event) => setEvaluationText(event.target.value)}
-            rows={4}
-            maxLength={256 * 1024}
-            placeholder="ChatGPT'nin JSON yanıtını buraya yapıştırın…"
-            className="w-full rounded-lg bg-bg-surface border border-border p-2 text-xs text-text-primary font-mono"
-          />
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            {importError ? <span role="alert" className="text-warning text-xs">{importError}</span> : <span />}
+          {!importOpen ? (
             <button
               type="button"
-              disabled={importing || !evaluationText.trim()}
-              onClick={async () => {
-                setImporting(true);
-                setImportError('');
-                const error = await onImportEvaluation(item, evaluationText);
-                if (error) setImportError(error);
-                else setEvaluationText('');
-                setImporting(false);
-              }}
-              className="px-3 py-1 text-xs rounded-lg bg-accent text-white disabled:opacity-50"
+              onClick={() => setImportOpen(true)}
+              className="text-xs text-accent hover:underline"
             >
-              {importing ? 'İçe aktarılıyor…' : 'Değerlendirmeyi kaydet'}
+              ChatGPT yanıtını içe aktar
             </button>
-          </div>
+          ) : (
+            <>
+              <label className="block text-xs text-text-tertiary" htmlFor={`news-eval-${item.id}`}>ChatGPT JSON yanıtı</label>
+              <textarea
+                id={`news-eval-${item.id}`}
+                value={evaluationText}
+                onChange={(event) => setEvaluationText(event.target.value)}
+                rows={4}
+                maxLength={256 * 1024}
+                placeholder="ChatGPT'nin JSON yanıtını buraya yapıştırın…"
+                className="w-full rounded-lg bg-bg-surface border border-border p-2 text-xs text-text-primary font-mono"
+              />
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                {importError ? <span role="alert" className="text-warning text-xs">{importError}</span> : <span />}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setImportOpen(false)}
+                    className="px-3 py-1 text-xs rounded-lg border border-border text-text-secondary"
+                  >
+                    Kapat
+                  </button>
+                  <button
+                    type="button"
+                    disabled={importing || !evaluationText.trim()}
+                    onClick={async () => {
+                      setImporting(true);
+                      setImportError('');
+                      const error = await onImportEvaluation(item, evaluationText);
+                      if (error) setImportError(error);
+                      else setEvaluationText('');
+                      setImporting(false);
+                    }}
+                    className="px-3 py-1 text-xs rounded-lg bg-accent text-white disabled:opacity-50"
+                  >
+                    {importing ? 'İçe aktarılıyor…' : 'Değerlendirmeyi kaydet'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </article>
