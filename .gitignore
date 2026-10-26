@@ -90,4 +90,4 @@ yedekler/
 graphify-out/
 supabase/.temp/
 *.local.md
-tasks/
+/tasks/
