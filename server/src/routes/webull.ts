@@ -95,7 +95,7 @@ webull.post(
 
     const appId = c.env.WEBULL_APP_ID;
     if (!appId) {
-      return c.json({ error: 'Webull OAuth is not configured on this server.' }, 500);
+      return c.json({ error: 'Bu sunucuda Webull OAuth ayarlanmamış.' }, 500);
     }
 
     const serviceClient = getDb();
@@ -186,13 +186,13 @@ webull.post('/api/webull/exchange', requiresLogin, async (c) => {
   const { code, connectionId } = body as { code?: string; connectionId?: string };
 
   if (!code || !connectionId) {
-    return c.json({ error: 'Missing code or connectionId' }, 400);
+    return c.json({ error: 'OAuth kodu veya bağlantı kimliği eksik.' }, 400);
   }
 
   const appId = c.env.WEBULL_APP_ID;
   const appSecret = c.env.WEBULL_APP_SECRET;
   if (!appId || !appSecret) {
-    return c.json({ error: 'Webull OAuth is not configured on this server.' }, 500);
+    return c.json({ error: 'Bu sunucuda Webull OAuth ayarlanmamış.' }, 500);
   }
 
   const serviceClient = getDb();
@@ -200,7 +200,7 @@ webull.post('/api/webull/exchange', requiresLogin, async (c) => {
   // Verify connection ownership
   const brokerConn = await brokerDb.findById(serviceClient, connectionId);
   if (!brokerConn || brokerConn.owner !== user.id) {
-    return c.json({ error: 'Connection not found' }, 404);
+    return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
   }
 
   const redirectUri = `${c.env.APP_URL}/api/webull/callback`;
@@ -240,7 +240,7 @@ webull.post('/api/webull/exchange', requiresLogin, async (c) => {
       // non-fatal — account fetch is best-effort
     }
 
-    return c.json({ message: 'Webull connected successfully', accounts, connectionId });
+    return c.json({ message: 'Webull bağlantısı kuruldu.', accounts, connectionId });
   } catch (err: any) {
     // Clean up the pending connection on failure
     try {
@@ -348,7 +348,7 @@ webull.post(
 
     const { connectionId, startDate } = body;
     if (!connectionId) {
-      return c.json({ error: 'Missing connectionId' }, 400);
+      return c.json({ error: 'Bağlantı kimliği eksik.' }, 400);
     }
 
     const serviceClient = getDb();
@@ -356,12 +356,12 @@ webull.post(
     // Load connection data
     const brokerConn = await brokerDb.findById(serviceClient, connectionId);
     if (!brokerConn || brokerConn.owner !== user.id) {
-      return c.json({ error: 'Connection not found' }, 404);
+      return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
     }
 
     const wbConn = await wbConnDb.findByBrokerConnectionId(serviceClient, connectionId);
     if (!wbConn || !wbConn.access_token) {
-      return c.json({ error: 'Webull not connected for this connection' }, 400);
+      return c.json({ error: 'Bu bağlantı için Webull hesabı bağlı değil.' }, 400);
     }
 
     try {
@@ -376,7 +376,7 @@ webull.post(
 
       const accountId = wbConn.account_id;
       if (!accountId) {
-        return c.json({ error: 'No Webull account linked. Please reconnect.' }, 400);
+        return c.json({ error: 'Bağlı Webull hesabı bulunamadı. Yeniden bağlanın.' }, 400);
       }
 
       // Fetch filled orders
@@ -386,7 +386,7 @@ webull.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'Synced 0 new trades', synced: 0 });
+        return c.json({ message: 'Yeni işlem eşitlenmedi.', synced: 0 });
       }
 
       // Convert orders to BrokerFill format for round-trip builder
@@ -406,7 +406,7 @@ webull.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'Synced 0 new trades', synced: 0 });
+        return c.json({ message: 'Yeni işlem eşitlenmedi.', synced: 0 });
       }
 
       // Dedup: check existing webull_order_ids
@@ -461,7 +461,7 @@ webull.delete(
 
     try {
       await brokerDb.deleteById(serviceClient, connectionId, user.id);
-      return c.json({ message: 'Connection deleted' });
+      return c.json({ message: 'Bağlantı silindi.' });
     } catch (err: any) {
       return c.json({ error: `Failed to delete connection: ${err.message}` }, 500);
     }

@@ -24,7 +24,7 @@ account.post('/api/preferences/theme', requiresLogin, async (c) => {
   let { theme, customColors } = body;
 
   if (!theme || !['dark', 'light', 'custom'].includes(theme)) {
-    return c.json({ error: 'Invalid theme.' }, 400);
+    return c.json({ error: 'Tema değeri geçersiz.' }, 400);
   }
 
   try {
@@ -76,7 +76,7 @@ account.post('/api/preferences/theme', requiresLogin, async (c) => {
     return c.json({ theme });
   } catch (err) {
     console.error('Theme update error:', err);
-    return c.json({ error: 'Failed to update theme.' }, 500);
+    return c.json({ error: 'Tema ayarı güncellenemedi.' }, 500);
   }
 });
 
@@ -113,7 +113,7 @@ account.post('/api/account/onboarding-complete', requiresLogin, async (c) => {
     await profilesDb.updateById(db, profile.id, { onboardingCompleted: true });
     return c.json({ ok: true });
   } catch (err: any) {
-    return c.json({ error: 'Failed to mark onboarding complete' }, 500);
+    return c.json({ error: 'Başlangıç kurulumu tamamlandı olarak işaretlenemedi.' }, 500);
   }
 });
 

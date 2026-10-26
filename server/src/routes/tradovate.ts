@@ -435,7 +435,7 @@ tradovate.post(
 
     const clientId = c.env.TRADOVATE_CLIENT_ID;
     if (!clientId) {
-      return c.json({ error: 'Tradovate OAuth is not configured on this server.' }, 500);
+      return c.json({ error: 'Bu sunucuda Tradovate OAuth ayarlanmamış.' }, 500);
     }
 
     const serviceClient = getDb();
@@ -530,13 +530,13 @@ tradovate.post('/api/tradovate/exchange', requiresLogin, async (c) => {
   const { code, connectionId } = body as { code?: string; connectionId?: string };
 
   if (!code || !connectionId) {
-    return c.json({ error: 'Missing code or connectionId' }, 400);
+    return c.json({ error: 'OAuth kodu veya bağlantı kimliği eksik.' }, 400);
   }
 
   const clientId = c.env.TRADOVATE_CLIENT_ID;
   const clientSecret = c.env.TRADOVATE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    return c.json({ error: 'Tradovate OAuth is not configured on this server.' }, 500);
+    return c.json({ error: 'Bu sunucuda Tradovate OAuth ayarlanmamış.' }, 500);
   }
 
   const serviceClient = getDb();
@@ -544,7 +544,7 @@ tradovate.post('/api/tradovate/exchange', requiresLogin, async (c) => {
   // Verify connection ownership
   const brokerConn = await brokerDb.findById(serviceClient, connectionId);
   if (!brokerConn || brokerConn.owner !== user.id) {
-    return c.json({ error: 'Connection not found' }, 404);
+    return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
   }
 
   const redirectUri = `${c.env.APP_URL}/api/tradovate/callback`;
@@ -741,7 +741,7 @@ tradovate.post(
     };
 
     if (!connectionId) {
-      return c.json({ error: 'Missing connectionId' }, 400);
+      return c.json({ error: 'Bağlantı kimliği eksik.' }, 400);
     }
 
     if (!Array.isArray(selectedAccounts)) {
@@ -751,14 +751,14 @@ tradovate.post(
     const serviceClient = getDb();
     const connection = await brokerDb.findById(serviceClient, connectionId);
     if (!connection || connection.owner !== user.id || !isValidTradovateBroker(connection.broker)) {
-      return c.json({ error: 'Connection not found' }, 404);
+      return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
     }
 
     await tvConnDb.updateByBrokerConnectionId(serviceClient, connectionId, {
       selected_accounts: selectedAccounts,
     });
 
-    return c.json({ message: 'Account settings saved' });
+    return c.json({ message: 'Hesap ayarları kaydedildi.' });
   },
 );
 
@@ -779,13 +779,13 @@ tradovate.post(
     };
 
     if (!connectionId || typeof isEval !== 'boolean') {
-      return c.json({ error: 'Missing connectionId or isEval' }, 400);
+      return c.json({ error: 'Bağlantı kimliği veya demo hesabı seçimi eksik.' }, 400);
     }
 
     const serviceClient = getDb();
     const connection = await brokerDb.findById(serviceClient, connectionId);
     if (!connection || connection.owner !== user.id) {
-      return c.json({ error: 'Connection not found' }, 404);
+      return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
     }
 
     await brokerDb.updateById(serviceClient, connectionId, { is_eval: isEval });
@@ -814,7 +814,7 @@ tradovate.post(
 
     const { connectionId, startDate, endDate } = body;
     if (!connectionId) {
-      return c.json({ error: 'Missing connectionId' }, 400);
+      return c.json({ error: 'Bağlantı kimliği eksik.' }, 400);
     }
 
     const accountIds = Array.isArray(body.accountIds)
@@ -831,7 +831,7 @@ tradovate.post(
       return c.json({ message: `Synced ${synced} new trades`, synced });
     } catch (err: any) {
       if (err.message === 'Connection not found') {
-        return c.json({ error: 'Connection not found' }, 404);
+        return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
       }
       if (err.message.includes('expired')) {
         return c.json({ error: err.message, expired: true }, 401);
@@ -897,7 +897,7 @@ tradovate.delete('/api/tradovate/connections/:connectionId', requiresLogin, asyn
 
   try {
     await brokerDb.deleteById(serviceClient, connectionId, user.id);
-    return c.json({ message: 'Connection deleted' });
+    return c.json({ message: 'Bağlantı silindi.' });
   } catch (err: any) {
     return c.json({ error: `Failed to delete connection: ${err.message}` }, 500);
   }
