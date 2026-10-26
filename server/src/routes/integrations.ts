@@ -66,6 +66,7 @@ function backupPayload(userId: string) {
     folder: backup.BACKUP_PATHS.root,
     dataDir: backup.BACKUP_PATHS.dataDir,
     dbFile: backup.BACKUP_PATHS.dbFile,
+    captureDir: backup.BACKUP_PATHS.captureDir,
     ...backup.backupStatus(),
   };
 }
