@@ -7,6 +7,7 @@ const { formatDuration, formatTimeEST } = require('../../utils/dateUtils');
 const { formatMoney, formatPrice, formatDateShort } = require('../../utils/format');
 const { TAG_COLOR_PRESETS } = require('../../utils/tagConstants');
 const Icons = require('../shared/Icons');
+const TradeMiniChart = require('../charts/TradeMiniChart');
 const sound = require('../../utils/sound');
 const { useEscapeClose } = require('../../utils/hooks');
 const RuleChecklist = require('../shared/RuleChecklist');
@@ -24,6 +25,7 @@ const TradeListPage = ({ trades, triggerReload, onEdit, onOpenForm, onOpenImport
   const [inlineTagColor, setInlineTagColor] = useState(TAG_COLOR_PRESETS[0]);
   const [inlineTagCreating, setInlineTagCreating] = useState(false);
   const [expandedTradeId, setExpandedTradeId] = useState(null);
+  const [miniChartTradeId, setMiniChartTradeId] = useState(null);
   const [tradeChecksMap, setTradeChecksMap] = useState({});
   const [checksLoading, setChecksLoading] = useState(false);
   const [deletingIds, setDeletingIds] = useState(new Set());
@@ -739,6 +741,21 @@ const TradeListPage = ({ trades, triggerReload, onEdit, onOpenForm, onOpenImport
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             <button
+                              type="button"
+                              className={`p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-input transition-colors ${isExpanded ? 'text-accent' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedTradeId(isExpanded ? null : trade._id);
+                                setMiniChartTradeId(null);
+                              }}
+                              title={isExpanded ? 'Ayrıntıları gizle' : 'Ayrıntıları göster'}
+                              aria-label={`${isExpanded ? 'Ayrıntıları gizle' : 'Ayrıntıları göster'}: ${trade.ticker}`}
+                              aria-expanded={isExpanded}
+                              aria-controls={isExpanded ? `trade-details-${trade._id}` : undefined}
+                            >
+                              <Icons.ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
                               className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-input transition-colors"
                               onClick={(e) => { e.stopPropagation(); onEdit(trade); }}
                               title="Düzenle"
@@ -759,7 +776,24 @@ const TradeListPage = ({ trades, triggerReload, onEdit, onOpenForm, onOpenImport
                       </tr>
                       {isExpanded && (
                         <tr className="border-b border-border/50">
-                          <td colSpan={visibleColCount} className="px-6 py-4 bg-bg-input/20">
+                          <td id={`trade-details-${trade._id}`} colSpan={visibleColCount} className="px-6 py-4 bg-bg-input/20">
+                            <div className="mb-4">
+                              <button
+                                type="button"
+                                onClick={() => setMiniChartTradeId(miniChartTradeId === trade._id ? null : trade._id)}
+                                aria-expanded={miniChartTradeId === trade._id}
+                                className="text-xs text-accent hover:underline"
+                              >
+                                {miniChartTradeId === trade._id ? 'Grafiği gizle' : 'İşlem grafiğini göster'}
+                              </button>
+                              {miniChartTradeId === trade._id && (
+                                Number(trade.enterPrice) > 0 && Number(trade.exitPrice) > 0 ? (
+                                  <TradeMiniChart trade={trade} height={220} className="mt-2" />
+                                ) : (
+                                  <p className="text-xs text-text-tertiary mt-2">Bu işlemde giriş/çıkış fiyatı olmadığı için grafik gösterilemiyor.</p>
+                                )
+                              )}
+                            </div>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                               <div className="space-y-3">
                                 {tradeTags.length > 0 && (
