@@ -20,6 +20,7 @@ function rowFromDb(row: any): TradovateConnectionRow {
   return {
     ...row,
     selected_accounts: parseNumberArray(row.selected_accounts),
+    accounts_disabled: row.accounts_disabled === 1 ? 1 : 0,
     account_ids: parseNumberArray(row.account_ids),
   } as TradovateConnectionRow;
 }
@@ -56,7 +57,7 @@ export async function create(
 export async function updateByBrokerConnectionId(
   db: Db,
   brokerConnectionId: string,
-  updates: Partial<Pick<TradovateConnectionRow, 'access_token' | 'token_expires_at' | 'oauth_nonce' | 'selected_accounts' | 'account_ids'>>,
+  updates: Partial<Pick<TradovateConnectionRow, 'access_token' | 'token_expires_at' | 'oauth_nonce' | 'selected_accounts' | 'accounts_disabled' | 'account_ids'>>,
 ): Promise<void> {
   const columns: string[] = [];
   const values: unknown[] = [];
@@ -76,6 +77,10 @@ export async function updateByBrokerConnectionId(
   if (updates.selected_accounts !== undefined) {
     columns.push('selected_accounts = ?');
     values.push(updates.selected_accounts == null ? null : JSON.stringify(updates.selected_accounts));
+  }
+  if (updates.accounts_disabled !== undefined) {
+    columns.push('accounts_disabled = ?');
+    values.push(updates.accounts_disabled ? 1 : 0);
   }
   if (updates.account_ids !== undefined) {
     columns.push('account_ids = ?');

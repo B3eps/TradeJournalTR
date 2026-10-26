@@ -68,7 +68,7 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         if (data.error) {
           setMessage?.({ type: 'error', text: data.error });
         } else {
-          setMessage?.({ type: 'success', text: `${label} connected successfully!` });
+          setMessage?.({ type: 'success', text: `${label} bağlantısı kuruldu.` });
           setCredentials({ email: '', password: '' });
           fetchStatus();
         }
@@ -92,7 +92,7 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         }
       }
     } catch (err) {
-      setMessage?.({ type: 'error', text: `Failed to start ${label} connection` });
+      setMessage?.({ type: 'error', text: `${label} bağlantısı başlatılamadı.` });
       setConnecting(false);
     }
   };
@@ -110,12 +110,12 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
       if (data.error) {
         setMessage?.({ type: 'error', text: data.error });
       } else {
-        setMessage?.({ type: 'success', text: data.message || 'Sync complete' });
+        setMessage?.({ type: 'success', text: data.message || 'Senkronizasyon tamamlandı.' });
         fetchStatus();
         onSyncComplete?.();
       }
     } catch (err) {
-      setMessage?.({ type: 'error', text: 'Sync failed' });
+      setMessage?.({ type: 'error', text: 'Senkronizasyon başarısız oldu.' });
     }
     setSyncingId(null);
   };
@@ -138,21 +138,21 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         const total = results.reduce((sum, r) => sum + (r.tradesImported || 0), 0);
         const errors = results.filter(r => r.error);
         if (errors.length > 0) {
-          setMessage?.({ type: 'error', text: `Synced ${total} trades. ${errors.length} connection(s) had errors.` });
+          setMessage?.({ type: 'error', text: `${total} işlem aktarıldı; ${errors.length} bağlantıda hata oluştu.` });
         } else {
-          setMessage?.({ type: 'success', text: `Synced ${total} trades across ${results.length} connections.` });
+          setMessage?.({ type: 'success', text: `${results.length} bağlantıdan toplam ${total} işlem aktarıldı.` });
         }
         fetchStatus();
         onSyncComplete?.();
       }
     } catch (err) {
-      setMessage?.({ type: 'error', text: 'Sync all failed' });
+      setMessage?.({ type: 'error', text: 'Tüm bağlantılar senkronize edilemedi.' });
     }
     setSyncingId(null);
   };
 
   const handleDisconnect = async (connectionId) => {
-    if (!confirm(`Disconnect this ${label} connection?`)) return;
+    if (!confirm(`${label} bağlantısını kesmek istiyor musunuz?`)) return;
     setMessage?.(null);
     try {
       const response = await authFetch(`${apiBase}/connections/${connectionId}`, { method: 'DELETE' });
@@ -160,11 +160,11 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
       if (data.error) {
         setMessage?.({ type: 'error', text: data.error });
       } else {
-        setMessage?.({ type: 'success', text: 'Connection removed' });
+        setMessage?.({ type: 'success', text: 'Bağlantı kaldırıldı.' });
         fetchStatus();
       }
     } catch (err) {
-      setMessage?.({ type: 'error', text: 'Failed to disconnect' });
+      setMessage?.({ type: 'error', text: 'Bağlantı kesilemedi.' });
     }
   };
 
@@ -187,13 +187,13 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
       if (data.error) {
         setMessage?.({ type: 'error', text: data.error });
       } else {
-        setMessage?.({ type: 'success', text: data.message || 'Import complete' });
+        setMessage?.({ type: 'success', text: data.message || 'İçe aktarma tamamlandı.' });
         setShowImportPrompt(null);
         fetchStatus();
         onSyncComplete?.();
       }
     } catch (err) {
-      setMessage?.({ type: 'error', text: 'Import failed' });
+      setMessage?.({ type: 'error', text: 'İçe aktarma başarısız oldu.' });
     }
     setSyncingId(null);
   };
@@ -211,7 +211,9 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
     if (!conn) return;
 
     const allAccountIds = (conn.accounts || []).map(a => a.id);
-    const currentEnabled = (!conn.selectedAccounts || conn.selectedAccounts.length === 0)
+    const currentEnabled = conn.accountsDisabled
+      ? []
+      : (!conn.selectedAccounts || conn.selectedAccounts.length === 0)
       ? allAccountIds
       : [...conn.selectedAccounts];
 
@@ -222,7 +224,7 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
       updated = currentEnabled.filter(id => !selectedAcctIds.includes(id));
     }
 
-    const toSave = updated.length === allAccountIds.length ? [] : updated;
+    const toSave = updated;
 
     setSavingAccounts(connectionId);
     try {
@@ -236,13 +238,13 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         setMessage?.({ type: 'error', text: data.error });
       } else {
         setConnections(prev => prev.map(c =>
-          c.connectionId === connectionId ? { ...c, selectedAccounts: toSave } : c
+          c.connectionId === connectionId ? { ...c, selectedAccounts: toSave, accountsDisabled: toSave.length === 0 } : c
         ));
         setSelectedAcctIds([]);
-        setMessage?.({ type: 'success', text: enable ? 'Accounts enabled' : 'Accounts disabled' });
+        setMessage?.({ type: 'success', text: enable ? 'Hesaplar etkinleştirildi.' : 'Hesaplar devre dışı bırakıldı.' });
       }
     } catch {
-      setMessage?.({ type: 'error', text: 'Failed to update accounts' });
+      setMessage?.({ type: 'error', text: 'Hesap ayarları güncellenemedi.' });
     }
     setSavingAccounts(null);
   };
@@ -264,7 +266,7 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         ));
       }
     } catch {
-      setMessage?.({ type: 'error', text: 'Failed to update eval setting' });
+      setMessage?.({ type: 'error', text: 'Değerlendirme hesabı ayarı güncellenemedi.' });
     }
   };
 

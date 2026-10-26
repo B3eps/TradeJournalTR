@@ -19,6 +19,10 @@ const TRADE_COLUMN_MIGRATIONS: Array<{ column: string; ddl: string }> = [
   { column: 'swap', ddl: 'ALTER TABLE trades ADD COLUMN swap REAL' },
 ];
 
+const TRADOVATE_COLUMN_MIGRATIONS: Array<{ column: string; ddl: string }> = [
+  { column: 'accounts_disabled', ddl: 'ALTER TABLE tradovate_connections ADD COLUMN accounts_disabled INTEGER NOT NULL DEFAULT 0' },
+];
+
 /** Live news feed cache (server/src/services/newsfeed). Pruned to 14 days. */
 const NEWS_ITEMS_DDL = `
 CREATE TABLE IF NOT EXISTS news_items (
@@ -141,6 +145,16 @@ function runMigrations(db: Db): void {
     if (!existing.has(m.column)) {
       db.exec(m.ddl);
       console.log(`[DB] migration: added trades.${m.column}`);
+    }
+  }
+
+  const tradovateColumns = new Set(
+    (db.prepare('PRAGMA table_info(tradovate_connections)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  for (const m of TRADOVATE_COLUMN_MIGRATIONS) {
+    if (!tradovateColumns.has(m.column)) {
+      db.exec(m.ddl);
+      console.log(`[DB] migration: added tradovate_connections.${m.column}`);
     }
   }
 }

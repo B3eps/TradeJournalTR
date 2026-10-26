@@ -128,6 +128,10 @@ async function syncConnection(
     throw new Error('Tradovate not connected for this connection');
   }
 
+  if (tvConn.accounts_disabled && !(options?.accountIds && options.accountIds.length > 0)) {
+    return 0;
+  }
+
   // Ensure fresh token
   const token = await ensureFreshToken(
     env,
@@ -155,7 +159,9 @@ async function syncConnection(
 
   // Filter positions by selected account IDs
   // Priority: explicit accountIds from request > saved selected_accounts > all accounts
-  const accountIds = options?.accountIds || tvConn.selected_accounts || [];
+  const accountIds = options?.accountIds?.length
+    ? options.accountIds
+    : tvConn.selected_accounts || [];
   const positions = accountIds.length > 0
     ? allPositions.filter((p) => accountIds.includes(p.accountId))
     : allPositions;
@@ -713,6 +719,7 @@ tradovate.get(
         createdAt: bc.created_at,
         accounts,
         selectedAccounts: tvConn?.selected_accounts || [],
+        accountsDisabled: tvConn?.accounts_disabled === 1,
       });
     }
 
@@ -756,9 +763,10 @@ tradovate.post(
 
     await tvConnDb.updateByBrokerConnectionId(serviceClient, connectionId, {
       selected_accounts: selectedAccounts,
+      accounts_disabled: selectedAccounts.length === 0 ? 1 : 0,
     });
 
-    return c.json({ message: 'Hesap ayarları kaydedildi.' });
+    return c.json({ message: 'Hesap ayarları kaydedildi.', accountsDisabled: selectedAccounts.length === 0 });
   },
 );
 

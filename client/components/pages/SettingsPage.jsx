@@ -80,13 +80,15 @@ const TradovateBrokerSection = ({ hook, expandedBroker, toggleBroker, brokerHead
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-text-secondary">Hesaplar</span>
-                        {conn.selectedAccounts && conn.selectedAccounts.length > 0 && conn.selectedAccounts.length < conn.accounts.length && (
+                        {conn.accountsDisabled ? (
+                          <span className="text-xs text-text-muted">Hiçbir hesap senkronize edilmiyor</span>
+                        ) : conn.selectedAccounts && conn.selectedAccounts.length > 0 && conn.selectedAccounts.length < conn.accounts.length && (
                           <span className="text-xs text-text-muted">{conn.accounts.length} hesaptan {conn.selectedAccounts.length} tanesi etkin</span>
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {conn.accounts.map(acct => {
-                          const isEnabled = !conn.selectedAccounts || conn.selectedAccounts.length === 0 || conn.selectedAccounts.includes(acct.id);
+                          const isEnabled = !conn.accountsDisabled && (!conn.selectedAccounts || conn.selectedAccounts.length === 0 || conn.selectedAccounts.includes(acct.id));
                           const isSelected = selectedAcctIds.includes(acct.id);
                           return (
                             <button key={acct.id} onClick={() => toggleAcctSelection(acct.id)}

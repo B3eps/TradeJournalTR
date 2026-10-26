@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS tradovate_connections (
   token_expires_at     TEXT,                              -- ISO timestamp
   oauth_nonce          TEXT,
   selected_accounts    TEXT,                              -- JSON number[]
+  accounts_disabled    INTEGER NOT NULL DEFAULT 0,         -- 1 = explicitly disable sync for every account
   account_ids          TEXT,                              -- JSON number[]
   created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
