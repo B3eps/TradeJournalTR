@@ -435,6 +435,7 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
   const [isForexExport, setIsForexExport] = useState(false);
   const [forexTz, setForexTz] = useState('local');
   const [numberWarnings, setNumberWarnings] = useState({ count: 0, samples: [] });
+  const [ambiguousNumbersAccepted, setAmbiguousNumbersAccepted] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -442,13 +443,16 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
       setMappedTrades([]); setImporting(false); setImportResult(null);
       setError(null); setDetectedFormat(null); setIsForexExport(false); setForexTz('local');
       setNumberWarnings({ count: 0, samples: [] });
+      setAmbiguousNumbersAccepted(false);
     }
   }, [isOpen]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    e.target.value = ''; // allow selecting the same file again after fixing ambiguous values
     setError(null);
+    setAmbiguousNumbersAccepted(false);
 
     Papa.parse(file, {
       header: true,
@@ -491,7 +495,10 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
           const missing = FOREX_FIELDS.filter(f => f.required && !fxMap[f.key]);
           if (missing.length === 0) {
             const transform = buildForexTransform(fxMap);
-            setNumberWarnings(findAmbiguousCommaValues(results.data, [fxMap.volume, fxMap.openPrice, fxMap.closePrice, fxMap.commission, fxMap.swap, fxMap.netPL]));
+            setNumberWarnings(findAmbiguousCommaValues(results.data, [
+              fxMap.volume, fxMap.enterPrice, fxMap.exitPrice, fxMap.commission, fxMap.swap,
+              fxMap.netProfit, fxMap.grossProfit,
+            ]));
             const trades = results.data.map((row, index) => ({ ...transform(row), sourceRow: index + 1 }));
             setDetectedFormat(detectForexPlatform(headers));
             setIsForexExport(true);
@@ -523,6 +530,7 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
 
   const handleMapConfirm = () => {
     setError(null);
+    setAmbiguousNumbersAccepted(false);
     const missing = CSV_TRADE_FIELDS.filter(f => f.required && !columnMap[f.key]);
     if (missing.length > 0) {
       setError(`Eşleştirilmesi zorunlu alanlar eksik: ${missing.map(f => f.label).join(', ')}`);
@@ -669,6 +677,15 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                   <p className="font-semibold">{numberWarnings.count} sayı virgül nedeniyle belirsiz olabilir.</p>
                   <p className="mt-1">Örneğin 1,234 şu an 1234 olarak yorumlanır. Ondalık değer kastettiyseniz CSV'de 1.234 biçimine çevirip dosyayı yeniden seçin.</p>
                   <p className="mt-1 text-warning/80">Örnekler: {numberWarnings.samples.map((sample) => `kayıt ${sample.record}, ${sample.column}: ${sample.value}`).join(' · ')}</p>
+                  <label className="mt-2 flex items-start gap-2 text-warning cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ambiguousNumbersAccepted}
+                      onChange={(event) => setAmbiguousNumbersAccepted(event.target.checked)}
+                      className="mt-0.5 accent-warning"
+                    />
+                    <span>Belirsiz sayıları binlik ayraç (1,234 → 1234) olarak yorumlayıp içe aktarmayı onaylıyorum.</span>
+                  </label>
                 </div>
               )}
               {isForexExport && (
@@ -799,7 +816,7 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
               <button
                 className="px-4 py-2 bg-accent text-accent-text text-sm font-semibold rounded-lg hover:brightness-110 transition-all disabled:opacity-50"
                 onClick={handleImport}
-                disabled={importing || preparedPreview.valid.length === 0 || preparedPreview.valid.length > 500}
+                disabled={importing || preparedPreview.valid.length === 0 || preparedPreview.valid.length > 500 || (numberWarnings.count > 0 && !ambiguousNumbersAccepted)}
               >
                 {importing ? 'İçe aktarılıyor...' : `${preparedPreview.valid.length} İşlemi İçe Aktar`}
               </button>
