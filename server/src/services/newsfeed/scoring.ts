@@ -201,7 +201,20 @@ export function scoreItem(input: { title: string; summary: string; sourceId: str
     instruments.add(m[1]);
     instruments.add(m[2]);
   }
+  if (input.category === 'metals') {
+    instruments.add('XAU');
+    instruments.add('XAG');
+  }
+  if (instruments.has('XAU') || instruments.has('XAG')) importance = Math.max(2, importance);
   if (tags.has('RATES') && instruments.has('USD') && /\b(fed|fomc|federal reserve)\b/i.test(title)) tags.add('FOMC');
+
+  // Major USD/macro and geopolitical releases can affect both precious metals;
+  // the evaluator decides whether the effect is actually directional or uncertain.
+  const metalRelevantTags = ['RATES', 'CPI', 'NFP', 'GDP', 'PPI', 'JOBS', 'PMI', 'GEOPOLITICS', 'TARIFF', 'SANCTIONS'];
+  if (importance >= 2 && (instruments.has('USD') || metalRelevantTags.some((tag) => tags.has(tag)))) {
+    instruments.add('XAU');
+    instruments.add('XAG');
+  }
 
   return { importance, tags: [...tags].slice(0, 8), instruments: [...instruments].slice(0, 10) };
 }

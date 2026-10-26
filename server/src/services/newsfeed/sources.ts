@@ -1,7 +1,7 @@
 import { parseFeed, toPlainText, type RawFeedItem } from './feed-parser';
 
-export type NewsCategory = 'forex' | 'nasdaq' | 'crypto';
-export const NEWS_CATEGORIES: NewsCategory[] = ['forex', 'nasdaq', 'crypto'];
+export type NewsCategory = 'forex' | 'nasdaq' | 'crypto' | 'metals';
+export const NEWS_CATEGORIES: NewsCategory[] = ['forex', 'nasdaq', 'crypto', 'metals'];
 
 export interface NewsSource {
   id: string;
@@ -85,6 +85,9 @@ export const NEWS_SOURCES: NewsSource[] = [
   { id: 'investinglive', name: 'investingLive (ForexLive)', category: 'forex', url: 'https://investinglive.com/feed/news', parser: rss },
   { id: 'fed', name: 'Federal Reserve', category: 'forex', url: 'https://www.federalreserve.gov/feeds/press_all.xml', parser: rss },
   { id: 'ecb', name: 'ECB', category: 'forex', url: 'https://www.ecb.europa.eu/rss/press.html', parser: rss },
+  { id: 'bls-cpi', name: 'U.S. Bureau of Labor Statistics · CPI', category: 'forex', url: 'https://www.bls.gov/feed/cpi.rss', parser: rss },
+  { id: 'bea', name: 'U.S. Bureau of Economic Analysis', category: 'forex', url: 'https://apps.bea.gov/rss/rss.xml', parser: rss },
+  { id: 'cme-metals', name: 'CME Group · Metals', category: 'metals', url: 'https://www.cmegroup.com/rss/metals-video-commentary.rss', parser: rss },
   { id: 'cnbc', name: 'CNBC', category: 'nasdaq', url: 'https://www.cnbc.com/id/100003114/device/rss/rss.html', parser: rss },
   { id: 'cnbc-tech', name: 'CNBC Tech', category: 'nasdaq', url: 'https://www.cnbc.com/id/19854910/device/rss/rss.html', parser: rss },
   { id: 'marketwatch', name: 'MarketWatch', category: 'nasdaq', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', parser: rss },

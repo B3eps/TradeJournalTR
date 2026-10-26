@@ -11,6 +11,7 @@ import {
   localHm, minutesOf,
 } from './http';
 import { claimOnce, releaseClaim } from '../reminders/sent';
+import type { Evaluation } from '../newsfeed/evaluation';
 
 export const NTFY_KEY = 'ntfy';
 const SEND_TIMEOUT_MS = 10 * 1000;
@@ -199,7 +200,7 @@ export function enabledNtfyUsers(): Array<{ userId: string; settings: NtfyStored
 
 // --- critical news push ---
 
-const CATEGORY_TR: Record<string, string> = { forex: 'Forex', nasdaq: 'Nasdaq', crypto: 'Kripto' };
+const CATEGORY_TR: Record<string, string> = { forex: 'Forex', nasdaq: 'Nasdaq', crypto: 'Kripto', metals: 'Değerli metaller' };
 const newsSentAt = new Map<string, number[]>();
 
 export interface NewsPushItem {
@@ -210,6 +211,12 @@ export interface NewsPushItem {
   importance: number;
   url?: string;
   publishedAt?: string;
+  instruments?: string[];
+}
+
+export interface EvaluatedNewsPushItem extends NewsPushItem {
+  instruments: string[];
+  evaluation: Evaluation;
 }
 
 async function pushNews(item: NewsPushItem): Promise<void> {
@@ -247,6 +254,21 @@ export function notifyCriticalNews(item: NewsPushItem): void {
   } catch (err: any) {
     console.warn('[ntfy] news push error:', err?.message || err);
   }
+}
+
+/** Sends localized precious-metals news only after a validated evaluation exists. */
+export function notifyCriticalEvaluation(item: EvaluatedNewsPushItem): void {
+  const metals: string[] = item.instruments.filter((x) => x === 'XAU' || x === 'XAG');
+  if (!metals.length) return;
+  const impacts = item.evaluation.etkilenen.filter((x) => metals.includes(x.enstruman));
+  const impactText = impacts.length
+    ? impacts.map((x) => `${x.enstruman}: ${x.etki} — ${x.neden}`).join('\n')
+    : `${metals.join('/')} için doğrudan etki net değil.`;
+  notifyCriticalNews({
+    ...item,
+    title: `${item.evaluation.turkce_baslik || item.title}\n${item.evaluation.ozet}\n${impactText}`.slice(0, 1200),
+    category: 'metals',
+  });
 }
 
 export { IntegrationError };

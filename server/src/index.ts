@@ -22,6 +22,7 @@ import robinhoodRoutes from './routes/robinhood';
 import webullRoutes from './routes/webull';
 import newsRoutes from './routes/news';
 import newsfeedRoutes from './routes/newsfeed';
+import internalChatGptRoutes from './routes/internal-chatgpt';
 import timetrackRoutes from './routes/timetrack';
 import taskRoutes from './routes/tasks';
 import projectRoutes from './routes/projects';
@@ -61,8 +62,13 @@ app.use('/api/*', async (c, next) => {
 
 app.use('*', authMiddleware);
 
-// Health check
-app.get('/api/health', (c) => c.json({ status: 'ok', bootToken: process.env.TRADE_GUNLUGU_BOOT_TOKEN || null }));
+// Health check authenticates Electron without disclosing its boot secret.
+app.get('/api/health', (c) => {
+  const expected = process.env.TRADE_GUNLUGU_BOOT_TOKEN || '';
+  const supplied = c.req.header('x-trade-gunlugu-boot-token') || '';
+  if (expected && supplied !== expected) return c.json({ error: 'forbidden' }, 403);
+  return c.json({ status: 'ok' });
+});
 
 // API routes (must be before page routes to take precedence)
 app.route('/', uploadRoutes);
@@ -80,6 +86,7 @@ app.route('/', robinhoodRoutes);
 app.route('/', webullRoutes);
 app.route('/', newsRoutes);
 app.route('/', newsfeedRoutes);
+app.route('/', internalChatGptRoutes);
 app.route('/', timetrackRoutes);
 app.route('/', taskRoutes);
 app.route('/', projectRoutes);

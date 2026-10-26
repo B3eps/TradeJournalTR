@@ -12,6 +12,7 @@ import * as newsDb from '../../db/news-items';
 import { getSetting, setSetting, listSettingsByKey } from '../../db/settings';
 import { EVALUATION_SAFETY_RULE_TR, buildAskPrompt, sanitizeEvaluation, type Evaluation } from '../newsfeed/evaluation';
 import { NEWS_EVAL_DIR } from '../newsfeed';
+import { notifyCriticalEvaluation } from '../ntfy';
 import { IntegrationError, bad, fetchWithTimeout, normalizeBaseUrl, optBool, intInRange } from '../ntfy/http';
 
 export const AI_KEY = 'ai';
@@ -121,11 +122,11 @@ async function chatOnce(s: AiSettings, messages: ChatMessage[], json: boolean, t
   }, CHAT_TIMEOUT_MS);
 }
 
-async function chat(s: AiSettings, messages: ChatMessage[], json: boolean): Promise<string> {
+async function chat(s: AiSettings, messages: ChatMessage[], json: boolean, highReasoning = false): Promise<string> {
   return serialize(async () => {
     let res: Response;
     try {
-      res = await chatOnce(s, messages, json, false);
+      res = await chatOnce(s, messages, json, !highReasoning);
       if (res.status === 400) {
         // older Ollama / models without a thinking switch reject `think`
         const txt = await res.text().catch(() => '');
@@ -251,7 +252,7 @@ export async function summarizeNews(s: AiSettings, id: unknown, opts: { force?: 
     url: row.url, publishedAt: row.published_at, importance: row.importance,
     tags: safeArr(row.tags), instruments: safeArr(row.instruments),
   });
-  const reply = await chat(s, [{ role: 'system', content: system }, { role: 'user', content: user }], true);
+  const reply = await chat(s, [{ role: 'system', content: system }, { role: 'user', content: user }], true, true);
   const ev = finalizeLocalEvaluation(parseModelJson(reply), id);
   if (!ev) throw new IntegrationError(502, 'Model geçerli bir değerlendirme JSON\'u üretmedi. Daha büyük bir model deneyin.');
 
@@ -265,6 +266,14 @@ export async function summarizeNews(s: AiSettings, id: unknown, opts: { force?: 
     fs.writeFileSync(file, fs.readFileSync(tmp, 'utf8'), 'utf8');
     try { fs.unlinkSync(tmp); } catch { /* ignore */ }
   }
+  try {
+    const instruments = safeArr(row.instruments);
+    notifyCriticalEvaluation({
+      id: row.id, source: row.source, category: row.category, title: row.title,
+      importance: row.importance, url: row.url, publishedAt: row.published_at,
+      instruments, evaluation: ev,
+    });
+  } catch { /* notification failures must not undo an evaluation */ }
   return ev;
 }
 

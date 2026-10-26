@@ -51,11 +51,10 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    id: 'market', label: 'Piyasa', subtitle: 'Haber, takvim ve grafik', icon: L.Activity,
+    id: 'market', label: 'Piyasa', subtitle: 'Haberler ve ekonomik takvim', icon: L.Activity,
     pages: [
       { id: 'newsfeed', label: 'Canlı Haberler', icon: L.Zap, keywords: 'news feed akis' },
       { id: 'news', label: 'Haber Takvimi', icon: L.CalendarDays, keywords: 'ekonomik takvim calendar' },
-      { id: 'charts', label: 'Fiyat Grafiği', icon: L.CandlestickChart || L.LineChart || L.BarChart3, keywords: 'chart grafik mum fiyat' },
     ],
   },
   {
@@ -88,7 +87,7 @@ const SETTINGS_SECTION = {
   id: 'settings', label: 'Ayarlar', subtitle: 'Hesap, tema ve bağlantılar', icon: L.Settings,
   pages: [
     { id: 'settings', label: 'Ayarlar', icon: L.Settings, keywords: 'settings tema hesap' },
-    { id: 'integrations', label: 'Bağlantılar', icon: L.Plug || L.Link, keywords: 'google ntfy telefon bildirim yedek ai ollama baglanti' },
+    { id: 'integrations', label: 'Bağlantılar', icon: L.Plug || L.Link, keywords: 'google ntfy telefon bildirim yedek ai chatgpt ollama haber' },
   ],
 };
 

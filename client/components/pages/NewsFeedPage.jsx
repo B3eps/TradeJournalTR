@@ -18,11 +18,13 @@ const DISCLAIMER = 'Bilgi amaçlıdır, yatırım tavsiyesi değildir. Karar ken
 
 const TABS = [
   { id: 'all', label: 'Tümü' },
+  { id: 'xau', label: 'Altın · XAU' },
+  { id: 'xag', label: 'Gümüş · XAG' },
   { id: 'forex', label: 'Forex' },
   { id: 'nasdaq', label: 'Nasdaq' },
   { id: 'crypto', label: 'Coin' },
 ];
-const CATEGORY_LABEL = { forex: 'Forex', nasdaq: 'Nasdaq', crypto: 'Coin' };
+const CATEGORY_LABEL = { forex: 'Forex', nasdaq: 'Nasdaq', crypto: 'Coin', metals: 'Değerli metaller' };
 
 const IMPORTANCE_FILTERS = [
   { id: 0, label: 'Tümü' },
@@ -194,7 +196,7 @@ const EvaluationBlock = ({ ev }) => {
 };
 
 // ---------- Item card ----------
-const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluation }) => {
+const NewsCard = ({ item, now, isNew, copiedId, askingId, evaluatingId, onAsk, onEvaluate, onImportEvaluation }) => {
   const [expanded, setExpanded] = useState(false);
   const [evaluationText, setEvaluationText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -207,6 +209,7 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluat
   const instruments = Array.isArray(item.instruments) ? item.instruments : [];
   const hasSummary = !!item.summary;
   const longSummary = hasSummary && item.summary.length > 140;
+  const metalRelated = /\b(xau|xag|gold|silver|precious metals?)\b/i.test([...instruments, ...tags, item.title, item.summary].join(' '));
 
   return (
     <article
@@ -239,10 +242,14 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluat
             className="hover:text-accent transition-colors no-underline text-text-primary"
             rel="noopener noreferrer"
           >
-            {item.title}
+            {item.evaluation && item.evaluation.turkce_baslik ? item.evaluation.turkce_baslik : item.title}
           </a>
-        ) : item.title}
+        ) : (item.evaluation && item.evaluation.turkce_baslik ? item.evaluation.turkce_baslik : item.title)}
       </h3>
+
+      {item.evaluation && item.evaluation.turkce_baslik && (
+        <p className="mt-1 text-xs text-text-muted">Orijinal başlık: {item.title}</p>
+      )}
 
       {hasSummary && (
         <div className="mt-1.5">
@@ -282,17 +289,29 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluat
         <div className="mt-3 bg-bg-input border border-border rounded-lg px-3 py-2 space-y-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-text-secondary text-xs">
-              {copiedId === item.id ? 'İstem panoya kopyalandı. ChatGPT yanıtını aşağıya yapıştırın.' : 'Yapay zeka değerlendirmesi bekleniyor…'}
+              {evaluatingId === item.id ? 'Kendi ChatGPT hesabınızla değerlendiriliyor…' : copiedId === item.id ? 'İstem panoya kopyalandı. ChatGPT yanıtını aşağıya yapıştırın.' : 'Yapay zeka değerlendirmesi bekleniyor…'}
             </span>
-            <button
-              type="button"
-              onClick={() => onAsk(item)}
-              disabled={askingId === item.id}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg bg-bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors disabled:opacity-60"
-            >
-              <Icons.Copy className="w-3.5 h-3.5" />
-              {askingId === item.id ? 'Hazırlanıyor…' : 'ChatGPT istemini kopyala'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              {metalRelated && typeof window !== 'undefined' && window.tradeGunluguDesktop && (
+                <button
+                  type="button"
+                  onClick={() => onEvaluate(item)}
+                  disabled={evaluatingId === item.id}
+                  className="px-3 py-1 text-xs rounded-lg bg-accent text-accent-text hover:brightness-110 transition-colors disabled:opacity-60"
+                >
+                  {evaluatingId === item.id ? 'Değerlendiriliyor…' : 'ChatGPT ile değerlendir'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onAsk(item)}
+                disabled={askingId === item.id}
+                className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg bg-bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors disabled:opacity-60"
+              >
+                <Icons.Copy className="w-3.5 h-3.5" />
+                {askingId === item.id ? 'Hazırlanıyor…' : 'İstemi kopyala'}
+              </button>
+            </div>
           </div>
           {!importOpen ? (
             <button
@@ -362,6 +381,7 @@ const NewsFeedPage = () => {
   const [now, setNow] = useState(Date.now());
   const [copiedId, setCopiedId] = useState(null);
   const [askingId, setAskingId] = useState(null);
+  const [evaluatingId, setEvaluatingId] = useState(null);
   const [askError, setAskError] = useState('');
   const [notify, setNotifyState] = useState(newsNotify.loadSettings);
   const [notifyMsg, setNotifyMsg] = useState('');
@@ -455,6 +475,24 @@ const NewsFeedPage = () => {
     if (mountedRef.current) setAskingId(null);
   };
 
+  const handleEvaluateWithChatGPT = async (item) => {
+    const desktopApi = typeof window !== 'undefined' && window.tradeGunluguDesktop;
+    if (!desktopApi || !desktopApi.chatgptNewsEvaluate) {
+      setAskError('ChatGPT bağlantısı için masaüstü uygulamasını güncelleyin.');
+      return;
+    }
+    setEvaluatingId(item.id);
+    setAskError('');
+    try {
+      await desktopApi.chatgptNewsEvaluate(item.id);
+      await load();
+    } catch (err) {
+      setAskError(err.message || 'ChatGPT haberi değerlendiremedi.');
+    } finally {
+      if (mountedRef.current) setEvaluatingId(null);
+    }
+  };
+
   const handleImportEvaluation = async (item, responseText) => {
     try {
       const response = await authFetch(`/api/newsfeed/evaluation/${encodeURIComponent(item.id)}`, {
@@ -499,7 +537,7 @@ const NewsFeedPage = () => {
 
   // ---- derived data ----
   const visibleItems = useMemo(() => items.filter(it =>
-    (prefs.tab === 'all' || it.category === prefs.tab) &&
+    (prefs.tab === 'all' || (prefs.tab === 'xau' ? it.instruments?.includes('XAU') : prefs.tab === 'xag' ? it.instruments?.includes('XAG') : it.category === prefs.tab)) &&
     (Number(it.importance) || 0) >= prefs.minImportance
   ), [items, prefs]);
 
@@ -542,7 +580,7 @@ const NewsFeedPage = () => {
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Canlı Haberler</h1>
           <p className="text-text-secondary text-sm mt-1">
-            Forex, Nasdaq ve kripto haber akışı · Her 20 saniyede otomatik güncellenir
+            Türkçe değerlendirmeli altın/gümüş ve küresel haber akışı · Her 20 saniyede yenilenir
             {pending > 0 ? ` · ${pending} haber değerlendirme bekliyor` : ''}
           </p>
         </div>
@@ -567,6 +605,11 @@ const NewsFeedPage = () => {
             Yenile
           </button>
         </div>
+      </div>
+
+      <div className="bg-bg-surface border border-border rounded-xl px-4 py-3 text-sm text-text-secondary">
+        İngilizce kaynak başlıkları korunur; değerlendirme geldiğinde Türkçe başlık, kısa özet ve XAU/XAG etkisi gösterilir.
+        Otomatik Türkçe değerlendirme için Bağlantılar → ChatGPT haber analizi bölümünden kendi hesabınızı bağlayıp otomasyonu ayrıca açın.
       </div>
 
       {/* Notification options */}
@@ -689,7 +732,9 @@ const NewsFeedPage = () => {
               isNew={!!baselineRef.current && !baselineRef.current.has(item.id)}
               copiedId={copiedId}
               askingId={askingId}
+              evaluatingId={evaluatingId}
               onAsk={handleAsk}
+              onEvaluate={handleEvaluateWithChatGPT}
               onImportEvaluation={handleImportEvaluation}
             />
           ))}

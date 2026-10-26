@@ -79,7 +79,16 @@ const fire = (title, body) => {
   } catch {}
 };
 
-const categoryLabel = (c) => (c === 'forex' ? 'Forex' : c === 'nasdaq' ? 'Nasdaq' : c === 'crypto' ? 'Coin' : (c || ''));
+const categoryLabel = (c) => (c === 'forex' ? 'Forex' : c === 'nasdaq' ? 'Nasdaq' : c === 'crypto' ? 'Coin' : c === 'metals' ? 'Değerli metaller' : (c || ''));
+const isMetalNews = (item) => Array.isArray(item && item.instruments) && item.instruments.some((x) => x === 'XAU' || x === 'XAG');
+const localizedTitle = (item) => item && item.evaluation && item.evaluation.turkce_baslik || item && item.title || 'Yeni haber';
+const localizedSummary = (item) => {
+  const ev = item && item.evaluation;
+  if (!ev) return `${item && item.source || ''} · ${categoryLabel(item && item.category)}`;
+  const metals = Array.isArray(ev.etkilenen) ? ev.etkilenen.filter((x) => x.enstruman === 'XAU' || x.enstruman === 'XAG') : [];
+  const effects = metals.map((x) => `${x.enstruman}: ${x.etki}`).join(', ');
+  return [ev.ozet, effects].filter(Boolean).join(' · ').slice(0, 500);
+};
 
 // Call after each successful poll with the full item list.
 // pageVisible: true when the news page is the one currently on screen.
@@ -106,14 +115,15 @@ const processItems = (items, { pageVisible = true } = {}) => {
         changed = true;
         if (initialized && imp >= 3) criticalArrived = true;
         if (item.evaluation) { evaluatedIds.add(item.id); evalChanged = true; }
-        if (canNotify && meets) {
-          fire(item.title || 'Yeni haber', `${item.source || ''} · ${categoryLabel(item.category)}`);
+        if (canNotify && meets && (!isMetalNews(item) || item.evaluation)) {
+          fire(localizedTitle(item), localizedSummary(item));
         }
       } else if (item.evaluation && !evaluatedIds.has(item.id)) {
         evaluatedIds.add(item.id);
         evalChanged = true;
         if (canNotify && meets) {
-          fire('Haber değerlendirmesi hazır', item.title || '');
+          fire(localizedTitle(item), localizedSummary(item));
+          if (isMetalNews(item) && imp >= 2) criticalArrived = true;
         }
       }
     }

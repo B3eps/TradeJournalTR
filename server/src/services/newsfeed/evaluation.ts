@@ -11,6 +11,7 @@ export type Seviye = 'düşük' | 'orta' | 'yüksek';
 export interface Evaluation {
   id: string;
   evaluatedAt: string;
+  turkce_baslik: string;
   ozet: string;
   onem: number;
   etkilenen: Array<{ enstruman: string; etki: Etki; neden: string }>;
@@ -38,6 +39,7 @@ export const EVALUATION_SAFETY_RULE_TR = [
 export const EVALUATION_SCHEMA_TR = `{
   "id": "<haberin 16 karakterlik hex id'si>",
   "evaluatedAt": "<ISO 8601 zaman damgası>",
+  "turkce_baslik": "<haberin kısa ve doğal Türkçe başlığı>",
   "ozet": "<1-2 cümlelik Türkçe özet, en fazla 400 karakter>",
   "onem": <1-5 arası tam sayı; 5 = piyasa için çok kritik>,
   "etkilenen": [
@@ -89,7 +91,8 @@ export function buildAskPrompt(item: AskItem, now = new Date()): string {
     timeZone: 'Europe/Istanbul', year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
   }).format(now);
   return [
-    'Sen bir piyasa haberi analistisin. Aşağıdaki tek haberi forex, Nasdaq ve kripto piyasaları açısından değerlendir.',
+    'Sen piyasa haberlerini Türkçe anlatan dikkatli bir analistsin. Haber başlığını doğal Türkçeye çevir; kısa, arkadaşça ve anlaşılır yaz, sansasyon ekleme.',
+    'Özellikle XAU (altın) ve XAG (gümüş) etkisini ayrı ayrı değerlendir. Her ikisi için de haber gerçekten ilgili değilse etkilenen listesine ekleme; ilgiliyse yönü, gerekçeyi ve belirsizliği belirt. USD, faiz, enflasyon, tahvil getirileri ve jeopolitik kanalları ancak haber destekliyorsa kullan.',
     `Bugünün tarihi: ${today} (Europe/Istanbul). Şu anki zaman: ${now.toISOString()}.`,
     '',
     '## Haber',
@@ -147,6 +150,7 @@ export const evaluationInputSchema = z.object({
   id: z.string().regex(/^[0-9a-f]{16}$/),
   evaluatedAt: z.string().refine((value) =>
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))),
+  turkce_baslik: z.string().optional(),
   ozet: z.string().min(1),
   onem: z.number().int().min(1).max(5),
   etkilenen: z.array(z.object({
@@ -195,6 +199,7 @@ export function sanitizeEvaluation(raw: unknown, id: string, fallbackDate: Date)
   const ev: Evaluation = {
     id,
     evaluatedAt: new Date(Number.isFinite(evaluatedAtRaw) ? evaluatedAtRaw : fallbackDate.getTime()).toISOString(),
+    turkce_baslik: str(r.turkce_baslik, 240),
     ozet: str(r.ozet, 400),
     onem: Number.isFinite(onemNum) ? Math.min(5, Math.max(1, Math.round(onemNum))) : 3,
     etkilenen: arr(r.etkilenen)

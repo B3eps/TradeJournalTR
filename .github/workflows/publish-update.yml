@@ -1,6 +1,9 @@
 name: Publish Trade Gunlugu update
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -37,17 +40,6 @@ jobs:
         shell: pwsh
         run: ./scripts/package-update-feed.ps1 -OutputRoot "$PWD/dist-app/update-feed"
 
-      - name: Read release version
-        id: release-info
-        shell: pwsh
-        run: |
-          $manifest = Get-Content -LiteralPath 'dist-app/update-feed/stage/version.json' -Raw | ConvertFrom-Json
-          "version=$($manifest.version)" >> $env:GITHUB_OUTPUT
-
-      - name: Build installable Windows app
-        shell: pwsh
-        run: npm run dist -- --config.directories.output=dist-app/github-release --publish never
-
       - name: Check out public update-only repository
         uses: actions/checkout@v4
         with:
@@ -65,24 +57,3 @@ jobs:
           git -C updates add --all
           git -C updates commit -m "Publish application update $(Get-Date -Format 'yyyy.MM.dd-HHmmss')"
           git -C updates push origin main
-
-      - name: Publish public Windows installer
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: B3eps/TradeJournalTR-Updates
-          token: ${{ secrets.UPDATES_REPO_TOKEN }}
-          tag_name: v${{ steps.release-info.outputs.version }}
-          name: Trade Günlüğü ${{ steps.release-info.outputs.version }}
-          body: Windows installer for Trade Günlüğü.
-          files: dist-app/github-release/Trade-Gunlugu-Setup.exe
-          draft: false
-          prerelease: false
-          make_latest: true
-
-      - name: Keep the installer available as a workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Trade-Gunlugu-Setup
-          path: dist-app/github-release/Trade-Gunlugu-Setup.exe
-          if-no-files-found: error
-          retention-days: 30

@@ -13,7 +13,10 @@ function waitForServer(url, expectedToken, timeoutMs) {
     };
     const tryOnce = () => {
       if (settled) return;
-      const req = http.get(url, { timeout: 2000 }, (res) => {
+      const req = http.get(url, {
+        timeout: 2000,
+        headers: { 'x-trade-gunlugu-boot-token': expectedToken },
+      }, (res) => {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
@@ -26,7 +29,7 @@ function waitForServer(url, expectedToken, timeoutMs) {
         res.on('end', () => {
           try {
             const health = JSON.parse(body);
-            if (res.statusCode === 200 && health.status === 'ok' && health.bootToken === expectedToken) {
+            if (res.statusCode === 200 && health.status === 'ok') {
               done();
               return;
             }

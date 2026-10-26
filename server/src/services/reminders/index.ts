@@ -11,6 +11,7 @@ import newsRoutes from '../../routes/news'; // reuses its cached economic calend
 import { enabledNtfyUsers, sendNtfy, inQuietHours, type NtfyStored } from '../ntfy';
 import { localYmd, localHm, minutesOf } from '../ntfy/http';
 import { claimOnce, releaseClaim, remindersDb, pruneSent } from './sent';
+import { getRecentMetalEvaluations } from '../newsfeed';
 
 const TICK_MS = 60 * 1000;
 const LATE_GRACE_MS = 2 * 60 * 1000; // a tick may run a little after the due time
@@ -100,6 +101,19 @@ export async function buildDigest(userId: string, now: Date): Promise<{ title: s
     .all(userId, today) as Array<{ title: string; due_time: string | null }>;
   const lines: string[] = [`Bugün ${dueToday} görev, gecikmiş ${overdue} görev.`];
   for (const t of top) lines.push(`• ${t.due_time ? t.due_time + ' ' : ''}${t.title.slice(0, 120)}`);
+  const metalNews = getRecentMetalEvaluations(new Date(now.getTime() - 24 * 60 * 60 * 1000), 3);
+  if (metalNews.length) {
+    lines.push('', 'Altın & gümüşte son 24 saat:');
+    for (const item of metalNews) {
+      const ev = item.evaluation!;
+      const metals = item.instruments.filter((x) => x === 'XAU' || x === 'XAG').join('/');
+      const effects = ev.etkilenen.filter((x) => x.enstruman === 'XAU' || x.enstruman === 'XAG')
+        .map((x) => `${x.enstruman}: ${x.etki}`).join(', ');
+      lines.push(`• ${metals} · ${ev.turkce_baslik || item.title}: ${ev.ozet}${effects ? ` (${effects})` : ''}`.slice(0, 500));
+    }
+  } else {
+    lines.push('', 'Altın & gümüş için değerlendirilmiş yeni haber yok.');
+  }
   const events = await upcomingHighImpact(now);
   if (events && events.length) {
     lines.push('', 'Yüksek etkili takvim:');

@@ -8,6 +8,7 @@ const api = require('../linkmap/api');
 const { computeLayout } = require('../linkmap/layout');
 const { TYPE_ORDER, TYPE_META, TypeIcon, nodeTypes } = require('../linkmap/nodeTypes');
 const DetailsPanel = require('../linkmap/DetailsPanel');
+const LinkMapBoard = require('../linkmap/LinkMapBoard');
 
 // =====================================================
 // BAĞLANTI HARİTASI (link map)
@@ -477,12 +478,27 @@ const LinkMapInner = ({ onNavigate }) => {
   );
 };
 
-const LinkMapPage = ({ onNavigate }) => (
-  <div className="p-4 sm:p-6 max-w-[1600px] mx-auto w-full" style={{ height: 'calc(100vh - 2rem)', minHeight: 560 }}>
-    <ReactFlowProvider>
-      <LinkMapInner onNavigate={onNavigate} />
-    </ReactFlowProvider>
-  </div>
-);
+const LinkMapPage = ({ onNavigate }) => {
+  const [mode, setMode] = useState(() => localStorage.getItem('linkmap-workspace-mode') === 'board' ? 'board' : 'map');
+  const changeMode = (next) => { setMode(next); localStorage.setItem('linkmap-workspace-mode', next); };
+  const tabClass = (selected) => `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selected ? 'bg-accent text-accent-text' : 'text-text-secondary hover:text-text-primary hover:bg-bg-input'}`;
+  return (
+    <div className="p-4 sm:p-6 max-w-[1600px] mx-auto w-full flex flex-col" style={{ height: 'calc(100vh - 2rem)', minHeight: 560 }}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-text-primary">Bağlantı Haritası</h1>
+          <p className="text-xs text-text-tertiary mt-0.5">Uygulama ilişkilerini keşfet veya bağımsız bir çalışma panosu aç.</p>
+        </div>
+        <div className="flex gap-1 rounded-xl border border-border bg-bg-surface p-1" role="tablist" aria-label="Harita görünümü">
+          <button type="button" role="tab" aria-selected={mode === 'map'} className={tabClass(mode === 'map')} onClick={() => changeMode('map')}>Uygulama haritası</button>
+          <button type="button" role="tab" aria-selected={mode === 'board'} className={tabClass(mode === 'board')} onClick={() => changeMode('board')}>Serbest pano</button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        {mode === 'board' ? <LinkMapBoard /> : <ReactFlowProvider><LinkMapInner onNavigate={onNavigate} /></ReactFlowProvider>}
+      </div>
+    </div>
+  );
+};
 
 module.exports = LinkMapPage;

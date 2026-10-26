@@ -8,8 +8,8 @@ import type { NewsItemRow } from '../../db/news-items';
 import { NEWS_SOURCES, userAgent, type NewsCategory, type NewsSource } from './sources';
 import { truncate } from './feed-parser';
 import { scoreItem } from './scoring';
-import { QUEUE_SCHEMA_MD, evaluationInputSchema, sanitizeEvaluation, type Evaluation } from './evaluation';
-import { notifyCriticalNews } from '../ntfy';
+import { QUEUE_SCHEMA_MD, buildAskPrompt, evaluationInputSchema, sanitizeEvaluation, type Evaluation } from './evaluation';
+import { notifyCriticalNews, notifyCriticalEvaluation } from '../ntfy';
 
 export const NEWS_QUEUE_DIR = path.join(DATA_DIR, 'news-queue');
 export const NEWS_EVAL_DIR = path.join(DATA_DIR, 'news-eval');
@@ -152,10 +152,12 @@ async function pollSource(src: NewsSource, counts: Map<string, number>): Promise
       // Integrations hook: newly stored, recent important items (never the initial backlog)
       let fresh: typeof items = [];
       try {
-        if (!backlog) fresh = items.filter((it) => it.importance >= 2 && Date.parse(it.publishedAt) >= now - BACKLOG_AGE_MS &&!newsDb.getNewsItem(getDb(), it.id));
+        if (!backlog) fresh = items.filter((it) => it.importance >= 2 && Date.parse(it.publishedAt) >= now - BACKLOG_AGE_MS && !newsDb.getNewsItem(getDb(), it.id));
       } catch { fresh = []; }
       if (items.length) newsDb.upsertNewsItems(getDb(), items);
       for (const it of fresh) {
+        // Precious-metal pushes wait for the Turkish evaluation; other categories keep their current headline alert.
+        if (it.instruments.includes('XAU') || it.instruments.includes('XAG')) continue;
         try { notifyCriticalNews(it); } catch { /* never break polling */ }
       }
     }
@@ -301,6 +303,14 @@ export function saveEvaluation(id: string, raw: unknown): Evaluation | null {
   evalCache.delete(id);
   lastEvalScan = 0;
   scanEvaluations(true);
+  try {
+    const instruments = safeJsonArray(item.instruments);
+    notifyCriticalEvaluation({
+      id, source: item.source, category: item.category, title: item.title,
+      importance: item.importance, url: item.url, publishedAt: item.published_at,
+      instruments, evaluation,
+    });
+  } catch { /* push notifications must not prevent saving a valid evaluation */ }
   return evaluation;
 }
 
@@ -392,6 +402,55 @@ export async function forceRefresh(): Promise<boolean> {
 export function getItemWithEvaluation(id: string): NewsItem | null {
   const row = newsDb.getNewsItem(getDb(), id);
   return row ? rowToItem(row, scanEvaluations()) : null;
+}
+
+/** Return the newest fresh, unevaluated XAU/XAG story for the local ChatGPT worker. */
+export function getNextMetalEvaluation(excludedIds: string[] = []): { id: string; prompt: string } | null {
+  const excluded = new Set(excludedIds.filter((id) => /^[0-9a-f]{16}$/.test(id)));
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const candidates = pendingRows();
+  for (const row of candidates) {
+    if (excluded.has(row.id) || Date.parse(row.first_seen_at) < cutoff) continue;
+    const values = [row.instruments, row.tags, row.title, row.summary].join(' ').toLocaleLowerCase('en-US');
+    if (!/(?:\bxau\b|\bxag\b|\bgold\b|\bsilver\b|\bprecious metals?\b)/i.test(values)) continue;
+    const item = rowToItem(row, scanEvaluations());
+    return { id: row.id, prompt: buildMetalPrompt(item) };
+  }
+  return null;
+}
+
+/** Build the validated one-item prompt used by both manual and automatic ChatGPT analysis. */
+export function getMetalEvaluationPrompt(id: string): string | null {
+  if (!/^[0-9a-f]{16}$/.test(id)) return null;
+  const item = getItemWithEvaluation(id);
+  if (!item || item.evaluation) return null;
+  const values = [...item.instruments, ...item.tags, item.title, item.summary].join(' ').toLocaleLowerCase('en-US');
+  if (!/(?:\bxau\b|\bxag\b|\bgold\b|\bsilver\b|\bprecious metals?\b)/i.test(values)) return null;
+  return buildMetalPrompt(item);
+}
+
+function buildMetalPrompt(item: NewsItem): string {
+  return [
+    'Bu haber için kısa, anlaşılır ve arkadaşça Türkçe bir piyasa özeti hazırla. Başlığı da doğal Türkçeye çevir.',
+    'Özellikle altın (XAU) ve gümüş (XAG) etkisini ayrı ayrı değerlendir. Haber bunlarla ilgili değilse ilişki uydurma; yalnız kanıtlanan bağlantıyı ve belirsizliği yaz.',
+    'Yalnızca JSON döndür; al/sat, işlem aç/kapat, fiyat seviyesi, lot veya pozisyon önerisi verme. Haberde olmayan bilgiyi uydurma.',
+    buildAskPrompt(item),
+  ].join('\n\n');
+}
+
+/** Recent evaluated gold/silver stories for the morning digest. */
+export function getRecentMetalEvaluations(since: Date, limit = 3): NewsItem[] {
+  try {
+    const evals = scanEvaluations();
+    return newsDb.listNewsItems(getDb(), { minImportance: 1, limit: 300 })
+      .map((row) => rowToItem(row, evals))
+      .filter((item) => Date.parse(item.publishedAt) >= since.getTime())
+      .filter((item) => item.evaluation && (item.instruments.includes('XAU') || item.instruments.includes('XAG')))
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+      .slice(0, Math.max(0, Math.min(5, limit)));
+  } catch {
+    return [];
+  }
 }
 
 function prune(): void {

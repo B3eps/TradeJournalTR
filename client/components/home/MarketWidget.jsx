@@ -5,8 +5,8 @@ const { request } = require('./api');
 const { useResource, useNow } = require('./hooks');
 const { Card, Skeleton, ErrorNote, Empty, Badge } = require('./ui');
 
-const CAT_TONE = { forex: 'blue', nasdaq: 'green', coin: 'amber', crypto: 'amber' };
-const CAT_LABEL = { forex: 'Forex', nasdaq: 'Nasdaq', coin: 'Coin', crypto: 'Coin' };
+const CAT_TONE = { forex: 'blue', nasdaq: 'green', coin: 'amber', crypto: 'amber', metals: 'amber' };
+const CAT_LABEL = { forex: 'Forex', nasdaq: 'Nasdaq', coin: 'Coin', crypto: 'Coin', metals: 'Altın/Gümüş' };
 
 const fetchCalendar = () => request('GET', '/api/news/calendar');
 const fetchNews = () => request('GET', '/api/newsfeed?minImportance=2&limit=6');

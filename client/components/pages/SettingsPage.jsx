@@ -357,6 +357,37 @@ const RobinhoodBrokerSection = ({ hook, expandedBroker, toggleBroker, brokerHead
 const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, customColors, tags, triggerReload }) => {
   const [activeTab, setActiveTab] = useState('brokers');
   const [message, setMessage] = useState(null);
+  const [appVersion, setAppVersion] = useState('');
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState('');
+
+  useEffect(() => {
+    const desktop = window.tradeGunluguDesktop;
+    if (desktop && typeof desktop.getVersion === 'function') {
+      desktop.getVersion().then(setAppVersion).catch(() => setAppVersion('Bilinmiyor'));
+    }
+  }, []);
+
+  const checkUpdates = async () => {
+    const desktop = window.tradeGunluguDesktop;
+    if (!desktop || typeof desktop.checkForUpdates !== 'function') {
+      setUpdateMessage('Güncelleme kontrolü yalnızca kurulu masaüstü uygulamasında kullanılabilir.');
+      return;
+    }
+    setUpdateBusy(true);
+    setUpdateMessage('Güncellemeler denetleniyor…');
+    try {
+      const result = await desktop.checkForUpdates();
+      if (result.status === 'current') setUpdateMessage(`Uygulama güncel. Sürüm ${result.version || appVersion}.`);
+      else if (result.status === 'staged') setUpdateMessage(`Sürüm ${result.version} indirildi. Yeniden başlatma penceresinden şimdi uygulayabilir veya daha sonra başlatabilirsiniz.`);
+      else if (result.status === 'unavailable') setUpdateMessage('Güncelleme kanalı yapılandırılmamış.');
+      else setUpdateMessage(`Güncelleme denetlenemedi: ${result.message || 'Bağlantı hatası.'}`);
+    } catch (err) {
+      setUpdateMessage(`Güncelleme denetlenemedi: ${err.message || 'Bağlantı hatası.'}`);
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
 
   // --- ProjectX multi-connection state ---
   const [pxConnections, setPxConnections] = useState([]);
@@ -751,9 +782,10 @@ const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, custom
   // UI helpers
   // =============================================
   const tabs = [
-    { id: 'brokers', label: 'Aracı Kurum Bağlantıları' },
+    { id: 'brokers', label: 'Aracı Kurumlar' },
     { id: 'tags', label: 'Etiketler' },
     { id: 'preferences', label: 'Tercihler' },
+    { id: 'updates', label: 'Güncelleme' },
   ];
 
   const toggleBroker = (id) => setExpandedBroker(expandedBroker === id ? null : id);
@@ -1403,6 +1435,19 @@ const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, custom
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'updates' && (
+        <div className="max-w-2xl bg-bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-text-primary font-semibold">Uygulama güncellemesi</h3>
+          <p className="text-text-secondary text-sm mt-1">Yüklü sürüm: <span className="font-mono text-text-primary">{appVersion || 'Yükleniyor…'}</span></p>
+          <button type="button" onClick={checkUpdates} disabled={updateBusy}
+            className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 bg-accent text-accent-text text-sm font-medium rounded-lg hover:brightness-110 transition-all disabled:opacity-50">
+            <Icons.RefreshCw className={`w-4 h-4 ${updateBusy ? 'animate-spin' : ''}`} />
+            {updateBusy ? 'Kontrol ediliyor…' : 'Güncellemeleri denetle'}
+          </button>
+          {updateMessage && <p className="mt-3 text-sm text-text-secondary" role="status">{updateMessage}</p>}
         </div>
       )}
     </div>
