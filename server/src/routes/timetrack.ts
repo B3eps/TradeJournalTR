@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, AuthContext } from '../bindings';
 import { requiresLogin } from '../middleware/auth';
+import { disableActivityWatchAutoStart, isActivityWatchAutoStartEnabled, startActivityWatch } from '../services/timetrack/launcher';
 import {
   getStatus,
   getSummary,
@@ -22,10 +23,24 @@ type HonoEnv = {
 // HTTP 200 so the page can show a friendly state instead of an error.
 const timetrack = new Hono<HonoEnv>();
 
+timetrack.post('/api/timetrack/start', requiresLogin, async (c) => {
+  try {
+    return c.json(await startActivityWatch());
+  } catch (err: any) {
+    console.error('[TimeTrack] ActivityWatch start failed:', err?.message || err);
+    return c.json({ error: err?.message || 'ActivityWatch başlatılamadı.' }, 503);
+  }
+});
+
+timetrack.post('/api/timetrack/disable-autostart', requiresLogin, (c) => {
+  disableActivityWatchAutoStart();
+  return c.json({ autoStart: false });
+});
+
 // GET /api/timetrack/status
 timetrack.get('/api/timetrack/status', requiresLogin, async (c) => {
   try {
-    return c.json(await getStatus());
+    return c.json({ ...await getStatus(), autoStart: isActivityWatchAutoStartEnabled() });
   } catch (err: any) {
     console.error('[TimeTrack] status failed:', err?.message || err);
     return c.json({ available: false, reason: 'error', buckets: [], hasWebWatcher: false });

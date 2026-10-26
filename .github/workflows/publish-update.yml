@@ -1,0 +1,67 @@
+name: Publish Trade Gunlugu update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check out private application source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure public binary-only update feed
+        shell: pwsh
+        env:
+          UPDATE_REPO: ${{ vars.UPDATE_REPO }}
+        run: |
+          if ($env:UPDATE_REPO -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Set the repository variable UPDATE_REPO to owner/repository.' }
+          $url = "https://raw.githubusercontent.com/$($env:UPDATE_REPO)/main/version.json"
+          $config = @{ manifestUrl = $url } | ConvertTo-Json
+          [IO.File]::WriteAllText((Join-Path $PWD 'electron/update-channel.json'), $config + "`n", [Text.UTF8Encoding]::new($false))
+
+      - name: Build update files
+        shell: pwsh
+        run: ./scripts/package-update-feed.ps1 -OutputRoot "$PWD/dist-app/update-feed"
+
+      - name: Build installable Windows app
+        shell: pwsh
+        run: npm run dist -- --config.directories.output=dist-app/github-release --publish never
+
+      - name: Check out public update-only repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.UPDATE_REPO }}
+          ref: main
+          token: ${{ secrets.UPDATES_REPO_TOKEN }}
+          path: updates
+
+      - name: Publish manifest and app update files
+        shell: pwsh
+        run: |
+          Copy-Item -Path "$PWD/dist-app/update-feed/stage/*" -Destination "$PWD/updates" -Recurse -Force
+          git -C updates config user.name "github-actions[bot]"
+          git -C updates config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C updates add --all
+          git -C updates commit -m "Publish application update $(Get-Date -Format 'yyyy.MM.dd-HHmmss')"
+          git -C updates push origin main
+
+      - name: Keep the installer available as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trade-Gunlugu-Setup
+          path: dist-app/github-release/Trade-Gunlugu-Setup.exe
+          if-no-files-found: error
+          retention-days: 30

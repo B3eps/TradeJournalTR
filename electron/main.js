@@ -3,7 +3,8 @@
 //   %APPDATA%\trade-gunlugu\app\   (server.cjs, schema.sql, public\, version.json)
 // Orası yoksa veya bozuksa exe içindeki yedek sürüm kullanılır. Böylece güncelleme
 // için exe'yi değiştirmek gerekmez, sadece bu klasördeki dosyalar yenilenir.
-// Güncellemeler yalnızca yerel klasörden gelir, internetten kod indirilmez.
+// İsteğe bağlı uzak güncellemeler HTTPS ile indirilir, SHA-256 ile doğrulanır ve
+// kullanıcı verilerinden ayrı olan uygulama klasörüne atomik biçimde alınır.
 //
 // Kabuk özellikleri: sistem tepsisi (pencere kapanınca arka planda çalışır; hatırlatıcılar,
 // otomatik yedek ve haber bildirimleri sürer), global kısayollar
@@ -19,6 +20,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Module = require('module');
 const { waitForServer } = require('./boot-health');
+const { stageRemoteUpdate } = require('./remote-updates');
 
 const PORT = 8471;
 const START_HIDDEN = process.argv.includes('--hidden');
@@ -75,6 +77,53 @@ function logRun(line) {
   try {
     fs.appendFileSync(path.join(app.getPath('userData'), 'last-run.log'), `${new Date().toISOString()} ${line}\n`);
   } catch (e) { /* günlük yazılamazsa sorun değil */ }
+}
+
+function getUpdateManifestUrl() {
+  const localConfig = path.join(app.getPath('userData'), 'update-channel.json');
+  const bundledConfig = path.join(app.getAppPath(), 'electron', 'update-channel.json');
+  for (const file of [localConfig, bundledConfig]) {
+    try {
+      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (typeof config.manifestUrl === 'string' && config.manifestUrl.trim()) return config.manifestUrl.trim();
+    } catch (e) { /* absent configuration */ }
+  }
+  return '';
+}
+
+async function checkRemoteUpdates() {
+  const manifestUrl = getUpdateManifestUrl();
+  if (!manifestUrl) return;
+  try {
+    const result = await stageRemoteUpdate({
+      manifestUrl,
+      updateRoot: app.getPath('userData'),
+    });
+    if (!result.updated) return;
+    logRun(`uzak guncelleme hazir surum=${result.version}`);
+    if (START_HIDDEN || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) {
+      if (Notification.isSupported()) {
+        new Notification({ title: 'Trade Günlüğü güncellemesi hazır', body: 'Yeni sürüm bir sonraki açılışta uygulanacak.' }).show();
+      }
+      return;
+    }
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Güncelleme hazır',
+      message: `Trade Günlüğü ${result.version} güncellemesi indirildi.`,
+      detail: 'Güncelleme mevcut verilerinizi korur. Şimdi yeniden başlatabilir veya bir sonraki açılışa bırakabilirsiniz.',
+      buttons: ['Şimdi yeniden başlat', 'Daha sonra'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice.response === 0) {
+      quitting = true;
+      app.relaunch();
+      app.exit(0);
+    }
+  } catch (err) {
+    logRun(`uzak guncelleme basarisiz: ${err && err.message ? err.message : err}`);
+  }
 }
 
 function showWindow() {
@@ -203,14 +252,17 @@ function createWindow(hidden) {
     height: 900,
     minWidth: 1000,
     minHeight: 640,
-    show: !hidden,
+    show: false,
     backgroundColor: '#0a0a0a',
     title: 'Trade Günlüğü',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   Menu.setApplicationMenu(null);
-  mainWindow.loadURL(`http://localhost:${PORT}/`);
+  mainWindow.loadFile(path.join(__dirname, 'splash.html'));
+  mainWindow.once('ready-to-show', () => {
+    if (!hidden && mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafe(url);
     return { action: 'deny' };
@@ -239,6 +291,9 @@ function startServer() {
   const bundledRoot = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
   const updateDir = path.join(app.getPath('userData'), 'app');
   process.env.DATA_DIR = path.join(app.getPath('userData'), 'data');
+  process.env.ACTIVITYWATCH_ROOT = app.isPackaged
+    ? path.join(process.resourcesPath, 'activitywatch')
+    : path.join(__dirname, '..', 'vendor-cache', 'activitywatch');
   process.env.PORT = String(PORT);
   process.env.TRADE_GUNLUGU_BOOT_TOKEN = BOOT_TOKEN;
   iconPath = path.join(bundledRoot, 'public', 'assets', 'img', 'favicon.png');
@@ -267,12 +322,21 @@ function startServer() {
 
 app.whenReady().then(async () => {
   try {
+    logRun('baslangic: pencere hazirlaniyor');
+    iconPath = path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'), 'public', 'assets', 'img', 'favicon.png');
+    createWindow(START_HIDDEN);
+    if (loginItemEnabled()) setLoginItem(true); // portable sürümden kurulumlu sürüme geçerken Windows başlangıç yolunu yenile
+    registerShortcuts();
+    buildTray();
+    const serverStart = Date.now();
     startServer();
     await waitForServer(`http://127.0.0.1:${PORT}/api/health`, BOOT_TOKEN, 20000);
-    registerShortcuts(); // tepsi menüsü etiketleri gerçek kısayolu göstersin diye önce kaydedilir
-    buildTray();
-    createWindow(START_HIDDEN);
+    logRun(`baslangic: sunucu hazir ${Date.now() - serverStart}ms`);
+    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(`http://localhost:${PORT}/`);
+    const updateTimer = setTimeout(() => { checkRemoteUpdates(); }, 5000);
+    if (updateTimer.unref) updateTimer.unref();
   } catch (err) {
+    logRun(`baslangic hatasi: ${err && err.stack ? err.stack : err}`);
     dialog.showErrorBox('Trade Günlüğü başlatılamadı', String((err && err.stack) || err));
     quitting = true;
     app.quit();

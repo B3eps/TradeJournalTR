@@ -44,6 +44,42 @@ CREATE INDEX IF NOT EXISTS idx_news_items_first_seen ON news_items(first_seen_at
 CREATE INDEX IF NOT EXISTS idx_news_items_category ON news_items(category, importance);
 `;
 
+/** Experimental paper-trading journal; intentionally separate from trades. */
+const PAPER_LAB_DDL = `
+CREATE TABLE IF NOT EXISTS paper_lab_runs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  target REAL NOT NULL CHECK (target > 0),
+  loss_guard REAL CHECK (loss_guard IS NULL OR loss_guard > 0),
+  mode TEXT NOT NULL DEFAULT 'stages' CHECK (mode IN ('stages', 'prop')),
+  program TEXT,
+  initial_balance REAL,
+  max_daily_drawdown REAL,
+  max_total_drawdown REAL,
+  consistency_limit REAL,
+  current_stage INTEGER NOT NULL DEFAULT 1 CHECK (current_stage BETWEEN 1 AND 3),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'failed', 'completed')),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_lab_runs_user ON paper_lab_runs(user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_lab_one_active_run ON paper_lab_runs(user_id) WHERE status = 'active';
+CREATE TABLE IF NOT EXISTS paper_lab_entries (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  stage INTEGER NOT NULL DEFAULT 1 CHECK (stage >= 1),
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL CHECK (side IN ('long', 'short')),
+  quantity REAL NOT NULL CHECK (quantity > 0),
+  entry_price REAL NOT NULL,
+  exit_price REAL NOT NULL,
+  fees REAL NOT NULL DEFAULT 0 CHECK (fees >= 0),
+  note TEXT NOT NULL DEFAULT '',
+  pnl REAL NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_lab_user_stage ON paper_lab_entries(user_id, stage, created_at);
+`;
+
 /**
  * Life OS: projects, labels, tasks, time entries and cross-entity links
  * (server/src/db/tasks.ts, server/src/db/links.ts). All rows are user-scoped.
@@ -137,6 +173,21 @@ CREATE TABLE IF NOT EXISTS user_flags (
 function runMigrations(db: Db): void {
   db.exec(NEWS_ITEMS_DDL);
   db.exec(LIFE_OS_DDL);
+  db.exec(PAPER_LAB_DDL);
+  const runColumns = new Set((db.prepare('PRAGMA table_info(paper_lab_runs)').all() as Array<{ name: string }>).map((c) => c.name));
+  const runMigrations: Array<{ column: string; ddl: string }> = [
+    { column: 'mode', ddl: "ALTER TABLE paper_lab_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'stages'" },
+    { column: 'program', ddl: 'ALTER TABLE paper_lab_runs ADD COLUMN program TEXT' },
+    { column: 'initial_balance', ddl: 'ALTER TABLE paper_lab_runs ADD COLUMN initial_balance REAL' },
+    { column: 'max_daily_drawdown', ddl: 'ALTER TABLE paper_lab_runs ADD COLUMN max_daily_drawdown REAL' },
+    { column: 'max_total_drawdown', ddl: 'ALTER TABLE paper_lab_runs ADD COLUMN max_total_drawdown REAL' },
+    { column: 'consistency_limit', ddl: 'ALTER TABLE paper_lab_runs ADD COLUMN consistency_limit REAL' },
+  ];
+  for (const m of runMigrations) if (!runColumns.has(m.column)) db.exec(m.ddl);
+  const paperColumns = new Set((db.prepare('PRAGMA table_info(paper_lab_entries)').all() as Array<{ name: string }>).map((c) => c.name));
+  if (!paperColumns.has('run_id')) db.exec('ALTER TABLE paper_lab_entries ADD COLUMN run_id TEXT REFERENCES paper_lab_runs(id) ON DELETE CASCADE');
+  if (!paperColumns.has('multiplier')) db.exec('ALTER TABLE paper_lab_entries ADD COLUMN multiplier REAL NOT NULL DEFAULT 1');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_paper_lab_run ON paper_lab_entries(run_id, stage, created_at)');
 
   const existing = new Set(
     (db.prepare('PRAGMA table_info(trades)').all() as Array<{ name: string }>).map((c) => c.name),

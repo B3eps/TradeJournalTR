@@ -1,0 +1,95 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const MAX_FILES = 1000;
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 300 * 1024 * 1024;
+
+async function fetchBytes(url, maxBytes) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000), redirect: 'follow' });
+  if (!response.ok) throw new Error(`Update HTTP ${response.status}`);
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > maxBytes) throw new Error('Güncelleme dosyası boyut sınırını aşıyor.');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxBytes) throw new Error('Güncelleme dosyası boyut sınırını aşıyor.');
+  return bytes;
+}
+
+function validRelativePath(value) {
+  if (typeof value !== 'string' || !value || value.includes('\\') || value.startsWith('/') || value.includes('\0')) return false;
+  const parts = value.split('/');
+  if (parts.some((p) => !p || p === '.' || p === '..')) return false;
+  return value === 'server.cjs' || value === 'schema.sql' || value.startsWith('public/');
+}
+
+function digest(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+async function stageRemoteUpdate({ manifestUrl, updateRoot }) {
+  const feed = new URL(manifestUrl);
+  if (feed.protocol !== 'https:') throw new Error('Güncelleme adresi HTTPS olmalı.');
+  const manifestBytes = await fetchBytes(feed.href, 1024 * 1024);
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
+  if (manifest.format !== 2 || typeof manifest.version !== 'string' ||
+      !/^\d{4}\.\d{2}\.\d{2}-\d{6}$/.test(manifest.version) ||
+      !manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files)) {
+    throw new Error('Güncelleme manifest biçimi geçersiz.');
+  }
+  const currentManifest = path.join(updateRoot, 'app', 'version.json');
+  try {
+    const current = JSON.parse(fs.readFileSync(currentManifest, 'utf8'));
+    if (current.version === manifest.version && current.format === 2) return { updated: false, version: manifest.version };
+  } catch { /* first update */ }
+
+  const files = Object.entries(manifest.files);
+  if (files.length < 5 || files.length > MAX_FILES) throw new Error('Güncelleme dosya listesi geçersiz.');
+  for (const required of ['server.cjs', 'schema.sql', 'public/trades.html', 'public/assets/appBundle.js', 'public/assets/app.css']) {
+    if (!Object.prototype.hasOwnProperty.call(manifest.files, required)) throw new Error(`Güncelleme dosyası eksik: ${required}`);
+  }
+  const baseUrl = new URL('.', feed);
+  const safeRoot = path.resolve(updateRoot);
+  fs.mkdirSync(safeRoot, { recursive: true });
+  const suffix = `${process.pid}-${Date.now()}`;
+  const stageDir = path.join(safeRoot, `app-stage-${suffix}`);
+  const previousDir = path.join(safeRoot, `app-previous-${suffix}`);
+  fs.mkdirSync(stageDir, { recursive: false });
+  let totalBytes = 0;
+  try {
+    for (const [relative, expectedHash] of files) {
+      if (!validRelativePath(relative) || typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/i.test(expectedHash)) {
+        throw new Error(`Güncelleme dosya yolu/hash geçersiz: ${relative}`);
+      }
+      const url = new URL(relative.split('/').map(encodeURIComponent).join('/'), baseUrl);
+      if (url.protocol !== 'https:' || url.origin !== feed.origin) throw new Error('Güncelleme dosyası farklı adresten indirilemez.');
+      const bytes = await fetchBytes(url.href, MAX_FILE_BYTES);
+      totalBytes += bytes.length;
+      if (totalBytes > MAX_TOTAL_BYTES) throw new Error('Toplam güncelleme boyutu sınırı aşıldı.');
+      if (digest(bytes).toLowerCase() !== expectedHash.toLowerCase()) throw new Error(`SHA-256 doğrulaması başarısız: ${relative}`);
+      const destination = path.resolve(stageDir, ...relative.split('/'));
+      if (!destination.startsWith(`${stageDir}${path.sep}`)) throw new Error('Güncelleme yolu uygulama klasörünün dışına çıkıyor.');
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, bytes, { flag: 'wx' });
+    }
+    fs.writeFileSync(path.join(stageDir, 'version.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    const appDir = path.join(safeRoot, 'app');
+    let movedOld = false;
+    try {
+      if (fs.existsSync(appDir)) { fs.renameSync(appDir, previousDir); movedOld = true; }
+      fs.renameSync(stageDir, appDir);
+    } catch (err) {
+      if (movedOld && !fs.existsSync(appDir) && fs.existsSync(previousDir)) fs.renameSync(previousDir, appDir);
+      throw err;
+    }
+    return { updated: true, version: manifest.version };
+  } catch (err) {
+    try {
+      const resolvedStage = path.resolve(stageDir);
+      if (resolvedStage.startsWith(`${safeRoot}${path.sep}`) && fs.existsSync(resolvedStage)) fs.rmSync(resolvedStage, { recursive: true, force: true });
+    } catch { /* preserve the original update error */ }
+    throw err;
+  }
+}
+
+module.exports = { stageRemoteUpdate };

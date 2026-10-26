@@ -41,6 +41,7 @@ const CardsPage = require('./components/pages/CardsPage');
 const LinkMapPage = require('./components/pages/LinkMapPage');
 const ChartsPage = require('./components/pages/ChartsPage');
 const FinancePage = require('./components/pages/FinancePage');
+const PaperLabPage = require('./components/pages/PaperLabPage');
 const IntegrationsPage = require('./components/pages/IntegrationsPage');
 
 // App shell
@@ -62,7 +63,7 @@ const ChartsPageComponent = unwrap(ChartsPage);
 const FinancePageComponent = unwrap(FinancePage);
 const IntegrationsPageComponent = unwrap(IntegrationsPage);
 
-const PAGE_IDS = ['home', 'dashboard', 'tasks', 'habits', 'timetrack', 'focus', 'newsfeed', 'news', 'charts', 'notes', 'cards', 'linkmap', 'finance', 'trades', 'analytics', 'strategy', 'premarket', 'backtesting', 'syncer', 'settings', 'integrations'];
+const PAGE_IDS = ['home', 'dashboard', 'tasks', 'habits', 'timetrack', 'focus', 'newsfeed', 'news', 'charts', 'notes', 'cards', 'linkmap', 'finance', 'trades', 'analytics', 'strategy', 'premarket', 'backtesting', 'syncer', 'paperlab', 'settings', 'integrations'];
 const LAST_PAGE_KEY = 'ui-last-page';
 const DotGrid = require('./components/shared/DotGrid');
 const OnboardingFlow = require('./components/OnboardingFlow');
@@ -548,6 +549,8 @@ const App = () => {
         return <SettingsPage onSyncComplete={triggerReload} onNavigate={setCurrentPage} theme={theme} onThemeChange={handleThemeChange} customColors={customColors} tags={tags} triggerReload={triggerReload} />;
       case 'syncer':
         return <TradeSyncerPage />;
+      case 'paperlab':
+        return <PaperLabPage />;
       case 'newsfeed':
         return <NewsFeedPage />;
       case 'news':

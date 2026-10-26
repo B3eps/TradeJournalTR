@@ -37,6 +37,7 @@ import integrationsRoutes from './routes/integrations';
 import googleRoutes from './routes/google';
 import graphRoutes from './routes/graph';
 import pageRoutes from './routes/pages';
+import paperLabRoutes from './routes/paper-lab';
 
 type HonoEnv = {
   Bindings: Env;
@@ -93,6 +94,7 @@ app.route('/', financeRoutes);
 app.route('/', integrationsRoutes);
 app.route('/', googleRoutes);
 app.route('/', graphRoutes);
+app.route('/', paperLabRoutes);
 
 // Static assets from public/ (bundles, css, manifest, service worker, ...)
 app.use('/*', serveStatic({ root: './public' }));

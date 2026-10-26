@@ -10,7 +10,7 @@
         "start": "tsx server/src/node.ts",
         "bundle": "esbuild server/src/node.ts --bundle --platform=node --format=cjs --external:better-sqlite3 --external:dukascopy-node --external:playwright-core --outfile=electron/server.cjs",
         "seed-demo": "tsx server/scripts/seed-demo.ts",
-        "dist": "npm run build && npm run bundle && electron-builder --win portable"
+        "dist": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-activitywatch.ps1 && npm run build && npm run bundle && electron-builder"
     },
     "dependencies": {
         "@tiptap/extension-link": "^3.32.0",
@@ -85,18 +85,32 @@
             {
                 "to": "public",
                 "from": "public"
+            },
+            {
+                "to": "activitywatch",
+                "from": "vendor-cache/activitywatch"
+            },
+            {
+                "to": "activitywatch/LICENSE.txt",
+                "from": "licenses/ActivityWatch-MPL-2.0.txt"
             }
         ],
         "win": {
-            "target": "portable",
+            "target": "nsis",
             "signAndEditExecutable": false
         },
-        "portable": {
-            "artifactName": "Trade-Gunlugu.exe"
+        "nsis": {
+            "oneClick": false,
+            "perMachine": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "runAfterFinish": false,
+            "artifactName": "Trade-Gunlugu-Setup.${ext}"
         },
         "asarUnpack": [
             "**/node_modules/better-sqlite3/**"
         ],
-        "npmRebuild": false
+        "npmRebuild": true
     }
 }

@@ -8,6 +8,7 @@ const { Popover, PopoverTrigger, PopoverContent } = require('../ui/popover');
 const { FadeIn } = require('../ui/motion');
 const sound = require('../../utils/sound');
 const PriceChart = require('../charts/PriceChart');
+const ChartWorkspace = require('../charts/ChartWorkspace');
 const H = require('../charts/chartHelpers');
 
 // =====================================================
@@ -202,6 +203,7 @@ const Stat = ({ label, value, tone }) => (
 // ---------- Page ----------
 const ChartsPage = ({ trades = [] }) => {
   const initial = useMemo(loadPrefs, []);
+  const [chartMode, setChartMode] = useState(() => H.readJson('charts-workspace-v1', {}).mode === 'single' ? 'single' : 'multi');
   const [symbols, setSymbols] = useState(FALLBACK_SYMBOLS);
   const [favorites, setFavorites] = useState(() => {
     const f = H.readJson(FAVS_KEY, ['EURUSD', 'XAUUSD']);
@@ -286,6 +288,7 @@ const ChartsPage = ({ trades = [] }) => {
   }, []);
 
   useEffect(() => {
+    if (chartMode !== 'single') return undefined;
     const reqKey = (sym) => `${sym}|${request.tf}|${request.nonce}`;
     let alive = true;
     olderRef.current = { loading: false, exhausted: false, blockedUntil: 0, cursor: null, empties: 0 };
@@ -312,7 +315,7 @@ const ChartsPage = ({ trades = [] }) => {
         setData({ key: reqKey(request.symbol), candles: [], source: '', note: '', error: FETCH_ERROR, loading: false });
       });
     return () => { alive = false; clearTimeout(timer); if (controller) controller.abort(); };
-  }, [request]);
+  }, [request, chartMode]);
 
   const loadOlder = useCallback(async () => {
     const st = olderRef.current;
@@ -518,6 +521,10 @@ const ChartsPage = ({ trades = [] }) => {
           </p>
         </div>
       </FadeIn>
+
+      <ChartWorkspace symbols={symbols} trades={allGeoms} showTrades={showTrades} mode={chartMode} onModeChange={setChartMode} />
+
+      {chartMode === 'single' && <>
 
       {/* Toolbar */}
       <div className="bg-bg-surface border border-border rounded-xl p-3 space-y-3">
@@ -786,6 +793,7 @@ const ChartsPage = ({ trades = [] }) => {
           TradingView Lightweight Charts™
         </a>.
       </p>
+      </>}
     </div>
   );
 };

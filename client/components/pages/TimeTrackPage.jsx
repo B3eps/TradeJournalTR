@@ -570,7 +570,7 @@ const CategoryEditor = ({ open, onClose, onSaved, play }) => {
 
 /* ── Unavailable state ───────────────────────────────────── */
 
-const Unavailable = ({ message, onRetry, retrying }) => (
+const Unavailable = ({ message, onRetry, retrying, onStart, starting, startError }) => (
   <FadeIn>
     <div className="bg-bg-surface border border-border rounded-2xl p-8 sm:p-10 text-center max-w-2xl mx-auto">
       <div className="w-14 h-14 rounded-2xl bg-warning/15 text-warning flex items-center justify-center mx-auto mb-4">
@@ -578,16 +578,22 @@ const Unavailable = ({ message, onRetry, retrying }) => (
       </div>
       <h2 className="text-text-primary text-lg font-semibold">ActivityWatch'a bağlanılamadı</h2>
       <p className="text-text-secondary text-sm mt-2 leading-relaxed">
-        Zaman takibi, bilgisayarınızda çalışan ActivityWatch uygulamasının verilerini okur.
-        Uygulama şu adreste yanıt vermiyor:
+        Zaman takibi ActivityWatch ile çalışır. Bu kurulumda ActivityWatch uygulamaya dahildir ve isterseniz buradan başlatabilirsiniz.
       </p>
       <p className="font-mono text-accent text-sm mt-2">{AW_ADDRESS}</p>
       {message && <p className="text-text-tertiary text-xs mt-2">{message}</p>}
+      <div className="mt-5 rounded-xl border border-warning/30 bg-warning/5 p-4 text-left text-xs text-text-secondary">
+        Başlatınca bilgisayarınızdaki etkin uygulama ve pencere başlıkları, ayrıca uyumlu tarayıcılarda açık site adresleri bu bilgisayarda kaydedilir. Veriler ActivityWatch’ın yerel veritabanında kalır; uygulamanın sunucusuna gönderilmez. İstediğiniz zaman ActivityWatch tepsi menüsünden çıkabilirsiniz.
+      </div>
       <ul className="text-left text-sm text-text-secondary mt-6 space-y-2 bg-bg-input/50 border border-border rounded-xl p-4">
-        <li>• Başlat menüsünden <span className="text-text-primary font-medium">ActivityWatch</span>'ı açın; sistem tepsisinde simgesi görünmelidir.</li>
-        <li>• Tarayıcıda <span className="font-mono text-text-primary">{AW_ADDRESS}</span> adresini açarak çalıştığını doğrulayın.</li>
-        <li>• Veriler toplanmaya başladıktan birkaç dakika sonra burada görünür.</li>
+        <li>• ActivityWatch yalnızca aşağıdaki başlat düğmesine bastığınızda çalışır.</li>
+        <li>• Web sitesi ayrıntıları için tarayıcı eklentisi ayrıca gerekir.</li>
+        <li>• Uygulamaya sonraki girişlerde otomatik başlatma tercihi bu bilgisayarda saklanır.</li>
       </ul>
+      {startError && <p role="alert" className="mt-3 text-sm text-negative">{startError}</p>}
+      <button type="button" onClick={onStart} disabled={starting} className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-accent-text text-sm font-semibold hover:brightness-110 disabled:opacity-50">
+        {starting ? 'ActivityWatch başlatılıyor…' : 'Bilgisayarımda zaman takibini başlat'}
+      </button>
       <button
         type="button"
         onClick={onRetry}
@@ -623,6 +629,8 @@ const TimeTrackPage = () => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [startingTracker, setStartingTracker] = useState(false);
+  const [trackerStartError, setTrackerStartError] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const reqId = useRef(0);
 
@@ -652,6 +660,23 @@ const TimeTrackPage = () => {
       if (id === reqId.current) { setLoading(false); setRefreshing(false); }
     }
   }, [range.from, range.to, trendRange]);
+
+  const enableActivityWatch = async () => {
+    setStartingTracker(true); setTrackerStartError('');
+    try {
+      await fetchJson('/api/timetrack/start', { method: 'POST' });
+      await load({ manual: true });
+    } catch (err) {
+      setTrackerStartError(err.message || 'ActivityWatch başlatılamadı.');
+    } finally { setStartingTracker(false); }
+  };
+
+  const disableActivityWatchAutoStart = async () => {
+    try {
+      await fetchJson('/api/timetrack/disable-autostart', { method: 'POST' });
+      setStatus((current) => ({ ...(current || {}), autoStart: false }));
+    } catch (err) { setTrackerStartError(err.message || 'Otomatik başlatma kapatılamadı.'); }
+  };
 
   useEffect(() => {
     load();
@@ -721,6 +746,7 @@ const TimeTrackPage = () => {
               <span className={`w-1.5 h-1.5 rounded-full ${status == null ? 'bg-text-muted' : connected ? 'bg-positive' : 'bg-negative'} ${connected ? 'animate-pulse' : ''}`} />
               {status == null ? 'Kontrol ediliyor' : connected ? 'ActivityWatch bağlı' : 'ActivityWatch bağlı değil'}
             </span>
+            {connected && status.autoStart && <button type="button" onClick={disableActivityWatchAutoStart} className="text-[11px] text-text-tertiary hover:text-text-primary underline">Uygulamayla otomatik başlatmayı kapat</button>}
           </div>
           <p className="text-text-secondary text-sm mt-1">
             {(() => { const l = fmtRangeLabel(range.from, range.to); return l.charAt(0).toLocaleUpperCase('tr-TR') + l.slice(1); })()}
@@ -783,7 +809,7 @@ const TimeTrackPage = () => {
       {loading && !summary ? (
         <SkeletonGrid />
       ) : !available ? (
-        <Unavailable message={summary && summary.reason !== 'unreachable' ? summary.message : ''} onRetry={() => load({ manual: true })} retrying={refreshing} />
+        <Unavailable message={summary && summary.reason !== 'unreachable' ? summary.message : ''} onRetry={() => load({ manual: true })} retrying={refreshing} onStart={enableActivityWatch} starting={startingTracker} startError={trackerStartError} />
       ) : (
         <>
           {/* Stat cards */}

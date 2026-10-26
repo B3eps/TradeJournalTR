@@ -8,6 +8,7 @@ import { refreshExpiringBrokerTokens } from './scheduled/broker-refresh';
 import { startNewsFeed } from './services/newsfeed';
 import { startIntegrations } from './services/integrations';
 import { startGoogleSync } from './services/google';
+import { startActivityWatchIfEnabled } from './services/timetrack/launcher';
 
 const BROKER_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // hourly
 
@@ -46,6 +47,7 @@ const main = async () => {
   // ntfy reminders, auto-backup, optional local-AI queue; Google Classroom sync (all idempotent, fail soft)
   startIntegrations();
   startGoogleSync();
+  startActivityWatchIfEnabled();
 };
 
 main().catch((err) => {

@@ -83,6 +83,7 @@ public/assets/*.map
 =
 data/
 dist-app/
+vendor-cache/
 electron/server.cjs
 electron/schema.sql
 yedekler/

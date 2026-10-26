@@ -79,6 +79,7 @@ const NAV_SECTIONS = [
       { id: 'premarket', label: 'Seans Öncesi', icon: L.Sunrise, keywords: 'premarket plan' },
       { id: 'backtesting', label: 'Test Günlüğü', icon: L.FlaskConical, keywords: 'backtest geriye dönük test' },
       { id: 'syncer', label: 'İşlem Eşitleyici', icon: L.RefreshCw, keywords: 'sync esitle broker' },
+      { id: 'paperlab', label: 'Deneme Laboratuvarı', icon: L.FlaskConical, keywords: 'paper deneme fon challenge simülasyon' },
     ],
   },
 ];
