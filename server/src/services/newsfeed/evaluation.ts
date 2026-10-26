@@ -3,6 +3,7 @@
  * JSON schema text, single-item ask prompt and the server-side sanitizer that
  * every evaluation file goes through before it reaches the client.
  */
+import { z } from 'zod';
 
 export type Etki = 'yukarı baskı' | 'aşağı baskı' | 'belirsiz' | 'karışık';
 export type Seviye = 'düşük' | 'orta' | 'yüksek';
@@ -138,8 +139,27 @@ export const ORDER_LANGUAGE_PATTERNS: RegExp[] = [
   /\b(buy|sell)\s+(now|at|above|below)\b/i,
 ];
 
-const ETKI_VALUES: Etki[] = ['yukarı baskı', 'aşağı baskı', 'belirsiz', 'karışık'];
-const SEVIYE_VALUES: Seviye[] = ['düşük', 'orta', 'yüksek'];
+const ETKI_VALUES = ['yukarı baskı', 'aşağı baskı', 'belirsiz', 'karışık'] as const satisfies readonly Etki[];
+const SEVIYE_VALUES = ['düşük', 'orta', 'yüksek'] as const satisfies readonly Seviye[];
+
+/** Strict shape validation for JSON pasted from an external AI; sanitizing still follows. */
+export const evaluationInputSchema = z.object({
+  id: z.string().regex(/^[0-9a-f]{16}$/),
+  evaluatedAt: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+  ozet: z.string().min(1),
+  onem: z.number().int().min(1).max(5),
+  etkilenen: z.array(z.object({
+    enstruman: z.string(),
+    etki: z.enum(ETKI_VALUES),
+    neden: z.string(),
+  })).max(6),
+  volatilite_riski: z.enum(SEVIYE_VALUES),
+  senaryolar: z.array(z.object({ eger: z.string(), o_zaman: z.string() })).max(6),
+  izlenecekler: z.array(z.string()).max(6),
+  uyari: z.string(),
+  haber_penceresi_dk: z.number().int().min(0).max(1440).nullable(),
+  guven: z.enum(SEVIYE_VALUES),
+});
 
 function fold(s: string): string {
   return s.toLocaleLowerCase('tr-TR')

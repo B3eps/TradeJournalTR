@@ -8,7 +8,7 @@ import type { NewsItemRow } from '../../db/news-items';
 import { NEWS_SOURCES, userAgent, type NewsCategory, type NewsSource } from './sources';
 import { truncate } from './feed-parser';
 import { scoreItem } from './scoring';
-import { QUEUE_SCHEMA_MD, sanitizeEvaluation, type Evaluation } from './evaluation';
+import { QUEUE_SCHEMA_MD, evaluationInputSchema, sanitizeEvaluation, type Evaluation } from './evaluation';
 import { notifyCriticalNews } from '../ntfy';
 
 export const NEWS_QUEUE_DIR = path.join(DATA_DIR, 'news-queue');
@@ -290,27 +290,11 @@ function writeFileAtomic(file: string, content: string): void {
 /** Save a user-pasted external evaluation after validating it against this news item. */
 export function saveEvaluation(id: string, raw: unknown): Evaluation | null {
   if (!/^[0-9a-f]{16}$/.test(id) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const candidate = raw as Record<string, unknown>;
-  const levels = ['düşük', 'orta', 'yüksek'];
-  const effects = ['yukarı baskı', 'aşağı baskı', 'belirsiz', 'karışık'];
-  const validDate = typeof candidate.evaluatedAt === 'string' && Number.isFinite(Date.parse(candidate.evaluatedAt));
-  const validAffected = Array.isArray(candidate.etkilenen) && candidate.etkilenen.length <= 6 && candidate.etkilenen.every((entry) =>
-    !!entry && typeof entry === 'object' && !Array.isArray(entry) &&
-    typeof entry.enstruman === 'string' && typeof entry.neden === 'string' && effects.includes(entry.etki as string));
-  const validScenarios = Array.isArray(candidate.senaryolar) && candidate.senaryolar.length <= 6 && candidate.senaryolar.every((entry) =>
-    !!entry && typeof entry === 'object' && !Array.isArray(entry) &&
-    typeof entry.eger === 'string' && typeof entry.o_zaman === 'string');
-  if (
-    candidate.id !== id || !validDate || typeof candidate.ozet !== 'string' || !candidate.ozet.trim() ||
-    typeof candidate.onem !== 'number' || !Number.isFinite(candidate.onem) || candidate.onem < 1 || candidate.onem > 5 ||
-    !validAffected || !validScenarios || !Array.isArray(candidate.izlenecekler) || candidate.izlenecekler.length > 6 ||
-    !candidate.izlenecekler.every((entry) => typeof entry === 'string') || typeof candidate.uyari !== 'string' ||
-    !levels.includes(candidate.volatilite_riski as string) || !levels.includes(candidate.guven as string) ||
-    !(candidate.haber_penceresi_dk === null || (typeof candidate.haber_penceresi_dk === 'number' && Number.isFinite(candidate.haber_penceresi_dk) && candidate.haber_penceresi_dk >= 0 && candidate.haber_penceresi_dk <= 1440))
-  ) return null;
+  const parsed = evaluationInputSchema.safeParse(raw);
+  if (!parsed.success || parsed.data.id !== id) return null;
   const item = newsDb.getNewsItem(getDb(), id);
   if (!item) return null;
-  const evaluation = sanitizeEvaluation(candidate, id, new Date());
+  const evaluation = sanitizeEvaluation(parsed.data, id, new Date());
   if (!evaluation || !evaluation.ozet) return null;
   fs.mkdirSync(NEWS_EVAL_DIR, { recursive: true });
   writeFileAtomic(path.join(NEWS_EVAL_DIR, `${id}.json`), `${JSON.stringify(evaluation, null, 2)}\n`);
