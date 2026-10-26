@@ -143,7 +143,9 @@ const BackupSection = () => {
                           {b.counts && typeof b.counts.tasks === 'number' ? ` · ${b.counts.tasks} görev` : ''}
                           {b.counts && typeof b.counts.trades === 'number' ? ` · ${b.counts.trades} işlem` : ''}
                           {typeof b.screenshotCount === 'number' ? ` · ${b.screenshotCount} işlem görseli` : ' · eski DB yedeği'}
-                          {typeof b.captureScreenshotCount === 'number' ? ` · ${b.captureScreenshotCount} ekran görüntüsü` : ''}
+                          {typeof b.captureScreenshotCount === 'number'
+                            ? ` · ${b.captureScreenshotCount} ekran görüntüsü`
+                            : (typeof b.screenshotCount === 'number' ? ' · önceki kapsam, kısayol görüntüleri yok' : '')}
                           {typeof b.evaluationCount === 'number' ? ` · ${b.evaluationCount} haber değerlendirmesi` : ''}
                           {b.keyMatches === null ? ' · anahtar doğrulanamıyor' : ''}
                         </div>
