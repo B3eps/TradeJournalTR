@@ -19,7 +19,7 @@ tag.get('/api/getTags', requiresLogin, async (c) => {
     return c.json({ tags });
   } catch (err) {
     console.error('getTags error:', err);
-    return c.json({ error: 'Error retrieving tags!' }, 500);
+    return c.json({ error: 'Etiketler alınamadı.' }, 500);
   }
 });
 
@@ -55,7 +55,7 @@ tag.post('/api/updateTag', requiresLogin, async (c) => {
   const body = await c.req.json();
 
   if (!body._id) {
-    return c.json({ error: 'Tag ID is required!' }, 400);
+    return c.json({ error: 'Etiket kimliği zorunludur.' }, 400);
   }
 
   try {
@@ -81,7 +81,7 @@ tag.post('/api/removeTag', requiresLogin, async (c) => {
   const body = await c.req.json();
 
   if (!body._id) {
-    return c.json({ error: 'Tag ID is required to delete!' }, 400);
+    return c.json({ error: 'Silinecek etiketin kimliği zorunludur.' }, 400);
   }
 
   try {

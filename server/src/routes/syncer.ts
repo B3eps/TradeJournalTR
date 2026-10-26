@@ -31,7 +31,7 @@ syncer.get('/api/syncer/config', async (c) => {
     return c.json({ config });
   } catch (err: any) {
     console.error('syncer config get error:', err);
-    return c.json({ error: 'Failed to fetch syncer config.' }, 500);
+    return c.json({ error: 'Eşitleyici ayarları alınamadı.' }, 500);
   }
 });
 
@@ -63,7 +63,7 @@ syncer.put('/api/syncer/config', async (c) => {
     return c.json({ config });
   } catch (err: any) {
     console.error('syncer config save error:', err);
-    return c.json({ error: 'Failed to save syncer config.' }, 500);
+    return c.json({ error: 'Eşitleyici ayarları kaydedilemedi.' }, 500);
   }
 });
 
@@ -111,7 +111,7 @@ syncer.get('/api/syncer/accounts', async (c) => {
     return c.json({ accounts: allAccounts });
   } catch (err: any) {
     console.error('syncer accounts error:', err);
-    return c.json({ error: 'Failed to fetch accounts.' }, 500);
+    return c.json({ error: 'Hesaplar alınamadı.' }, 500);
   }
 });
 
@@ -124,13 +124,13 @@ syncer.post('/api/syncer/start', async (c) => {
   try {
     const config = await syncerDb.getConfig(db, user.id);
     if (!config) {
-      return c.json({ error: 'No syncer config found. Save a config first.' }, 400);
+      return c.json({ error: 'Eşitleyici ayarı bulunamadı. Önce ayarı kaydedin.' }, 400);
     }
     if (!config.leader_connection_id || !config.leader_account_id) {
       return c.json({ error: 'Leader account not configured.' }, 400);
     }
     if (!config.follower_accounts || config.follower_accounts.length === 0) {
-      return c.json({ error: 'No follower accounts configured.' }, 400);
+      return c.json({ error: 'Takipçi hesap seçilmemiş.' }, 400);
     }
     if (!positiveId(config.leader_account_id)
       || config.follower_accounts.some((follower) => !positiveId(follower.accountId)
@@ -152,7 +152,7 @@ syncer.post('/api/syncer/start', async (c) => {
     return c.json({ ok: true, message: 'Syncer started.' });
   } catch (err: any) {
     console.error('syncer start error:', err);
-    return c.json({ error: 'Failed to start syncer.' }, 500);
+    return c.json({ error: 'Eşitleyici başlatılamadı.' }, 500);
   }
 });
 
@@ -165,14 +165,14 @@ syncer.post('/api/syncer/stop', async (c) => {
   try {
     const config = await syncerDb.getConfig(db, user.id);
     if (!config) {
-      return c.json({ error: 'No syncer config found.' }, 400);
+      return c.json({ error: 'Eşitleyici ayarı bulunamadı.' }, 400);
     }
 
     await syncerDb.setActive(db, config.id, false);
     return c.json({ ok: true, message: 'Syncer stopped.' });
   } catch (err: any) {
     console.error('syncer stop error:', err);
-    return c.json({ error: 'Failed to stop syncer.' }, 500);
+    return c.json({ error: 'Eşitleyici durdurulamadı.' }, 500);
   }
 });
 
@@ -233,7 +233,7 @@ syncer.post('/api/syncer/mirror', async (c) => {
 
     const followers = config.follower_accounts || [];
     if (followers.length === 0) {
-      return c.json({ error: 'No followers configured.' }, 400);
+      return c.json({ error: 'Takipçi hesap seçilmemiş.' }, 400);
     }
     if (!positiveId(config.leader_account_id)
       || followers.some((follower) => !positiveId(follower.accountId)
@@ -577,7 +577,7 @@ syncer.get('/api/syncer/account-status', async (c) => {
     return c.json({ accounts: accountStatuses });
   } catch (err: any) {
     console.error('syncer account-status error:', err);
-    return c.json({ error: 'Failed to fetch account status.' }, 500);
+    return c.json({ error: 'Hesap durumu alınamadı.' }, 500);
   }
 });
 
@@ -597,7 +597,7 @@ syncer.get('/api/syncer/logs', async (c) => {
     return c.json({ logs });
   } catch (err: any) {
     console.error('syncer logs error:', err);
-    return c.json({ error: 'Failed to fetch logs.' }, 500);
+    return c.json({ error: 'Eşitleyici kayıtları alınamadı.' }, 500);
   }
 });
 

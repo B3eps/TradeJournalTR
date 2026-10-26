@@ -20,7 +20,7 @@ strategy.get('/api/strategy/rules', requiresLogin, async (c) => {
     return c.json({ rules });
   } catch (err) {
     console.error('getRules error:', err);
-    return c.json({ error: 'Failed to fetch rules' }, 500);
+    return c.json({ error: 'Kurallar alınamadı.' }, 500);
   }
 });
 
@@ -40,7 +40,7 @@ strategy.post('/api/strategy/rules', requiresLogin, async (c) => {
     return c.json(rule);
   } catch (err) {
     console.error('createRule error:', err);
-    return c.json({ error: 'Failed to create rule' }, 500);
+    return c.json({ error: 'Kural oluşturulamadı.' }, 500);
   }
 });
 
@@ -56,7 +56,7 @@ strategy.put('/api/strategy/rules/:id', requiresLogin, async (c) => {
     return c.json(rule);
   } catch (err) {
     console.error('updateRule error:', err);
-    return c.json({ error: 'Failed to update rule' }, 500);
+    return c.json({ error: 'Kural güncellenemedi.' }, 500);
   }
 });
 
@@ -71,7 +71,7 @@ strategy.delete('/api/strategy/rules/:id', requiresLogin, async (c) => {
     return c.json({ message: 'Rule deleted' });
   } catch (err) {
     console.error('deleteRule error:', err);
-    return c.json({ error: 'Failed to delete rule' }, 500);
+    return c.json({ error: 'Kural silinemedi.' }, 500);
   }
 });
 
@@ -86,7 +86,7 @@ strategy.get('/api/strategy/checks/trade/:tradeId', requiresLogin, async (c) => 
     return c.json({ checks });
   } catch (err) {
     console.error('getTradeRuleChecks error:', err);
-    return c.json({ error: 'Failed to fetch trade checks' }, 500);
+    return c.json({ error: 'İşlem kuralı kontrolleri alınamadı.' }, 500);
   }
 });
 
@@ -106,7 +106,7 @@ strategy.post('/api/strategy/checks/trade', requiresLogin, async (c) => {
     return c.json(check);
   } catch (err) {
     console.error('upsertTradeRuleCheck error:', err);
-    return c.json({ error: 'Failed to save trade check' }, 500);
+    return c.json({ error: 'İşlem kuralı kontrolü kaydedilemedi.' }, 500);
   }
 });
 
@@ -121,7 +121,7 @@ strategy.get('/api/strategy/checks/daily/:date', requiresLogin, async (c) => {
     return c.json({ checks });
   } catch (err) {
     console.error('getDailyRuleChecks error:', err);
-    return c.json({ error: 'Failed to fetch daily checks' }, 500);
+    return c.json({ error: 'Günlük kontroller alınamadı.' }, 500);
   }
 });
 
@@ -141,7 +141,7 @@ strategy.post('/api/strategy/checks/daily', requiresLogin, async (c) => {
     return c.json(check);
   } catch (err) {
     console.error('upsertDailyRuleCheck error:', err);
-    return c.json({ error: 'Failed to save daily check' }, 500);
+    return c.json({ error: 'Günlük kontrol kaydedilemedi.' }, 500);
   }
 });
 
@@ -245,7 +245,7 @@ strategy.get('/api/strategy/analytics', requiresLogin, async (c) => {
     return c.json({ analytics, disciplineScore });
   } catch (err) {
     console.error('getAnalytics error:', err);
-    return c.json({ error: 'Failed to compute analytics' }, 500);
+    return c.json({ error: 'Analiz hesaplanamadı.' }, 500);
   }
 });
 
