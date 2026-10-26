@@ -139,6 +139,10 @@ function stamp(d: Date): string {
 function copyFlatFiles(source: string, destination: string): number {
   fs.mkdirSync(destination, { recursive: true });
   if (!fs.existsSync(source)) return 0;
+  const sourceStat = fs.lstatSync(source);
+  if (sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) {
+    throw new Error(`Unsupported backup source: ${source}`);
+  }
   let copied = 0;
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
     if (!entry.isFile()) throw new Error(`Unsupported backup entry: ${entry.name}`);
