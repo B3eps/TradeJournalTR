@@ -72,7 +72,14 @@ async function stageRemoteUpdate({ manifestUrl, refUrl = '', updateRoot, current
     throw new Error('Güncelleme manifest biçimi geçersiz.');
   }
   const currentManifest = path.join(updateRoot, 'app', 'version.json');
+  const pendingManifest = path.join(updateRoot, 'app-pending', 'version.json');
   let hasInstalledUpdateManifest = false;
+  try {
+    const pending = JSON.parse(fs.readFileSync(pendingManifest, 'utf8'));
+    if (pending.format === 2 && pending.version === manifest.version) {
+      return { updated: false, pending: true, version: manifest.version };
+    }
+  } catch { /* no pending update */ }
   try {
     const current = JSON.parse(fs.readFileSync(currentManifest, 'utf8'));
     hasInstalledUpdateManifest = current.format === 2 && typeof current.version === 'string';
@@ -90,7 +97,6 @@ async function stageRemoteUpdate({ manifestUrl, refUrl = '', updateRoot, current
   fs.mkdirSync(safeRoot, { recursive: true });
   const suffix = `${process.pid}-${Date.now()}`;
   const stageDir = path.join(safeRoot, `app-stage-${suffix}`);
-  const previousDir = path.join(safeRoot, `app-previous-${suffix}`);
   fs.mkdirSync(stageDir, { recursive: false });
   let totalBytes = 0;
   try {
@@ -110,16 +116,10 @@ async function stageRemoteUpdate({ manifestUrl, refUrl = '', updateRoot, current
       fs.writeFileSync(destination, bytes, { flag: 'wx' });
     }
     fs.writeFileSync(path.join(stageDir, 'version.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-    const appDir = path.join(safeRoot, 'app');
-    let movedOld = false;
-    try {
-      if (fs.existsSync(appDir)) { fs.renameSync(appDir, previousDir); movedOld = true; }
-      fs.renameSync(stageDir, appDir);
-    } catch (err) {
-      if (movedOld && !fs.existsSync(appDir) && fs.existsSync(previousDir)) fs.renameSync(previousDir, appDir);
-      throw err;
-    }
-    return { updated: true, version: manifest.version };
+    const pendingDir = path.join(safeRoot, 'app-pending');
+    if (fs.existsSync(pendingDir)) fs.rmSync(pendingDir, { recursive: true, force: true });
+    fs.renameSync(stageDir, pendingDir);
+    return { updated: true, pending: true, version: manifest.version };
   } catch (err) {
     try {
       const resolvedStage = path.resolve(stageDir);
@@ -129,4 +129,58 @@ async function stageRemoteUpdate({ manifestUrl, refUrl = '', updateRoot, current
   }
 }
 
-module.exports = { stageRemoteUpdate };
+function isValidUpdateDirectory(dir) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8'));
+    if (manifest.format !== 2 || typeof manifest.version !== 'string' ||
+        !/^\d{4}\.\d{2}\.\d{2}-\d{6}$/.test(manifest.version) ||
+        !manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files)) return false;
+    const entries = Object.entries(manifest.files);
+    if (entries.length < 5 || entries.length > MAX_FILES) return false;
+    for (const required of ['server.cjs', 'schema.sql', 'public/trades.html', 'public/assets/appBundle.js', 'public/assets/app.css']) {
+      if (!Object.hasOwn(manifest.files, required)) return false;
+    }
+    const root = path.resolve(dir) + path.sep;
+    return entries.every(([relative, expectedHash]) => {
+      if (!validRelativePath(relative) || typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/i.test(expectedHash)) return false;
+      const file = path.resolve(dir, ...relative.split('/'));
+      if (!file.startsWith(root) || !fs.statSync(file).isFile()) return false;
+      return digest(fs.readFileSync(file)).toLowerCase() === expectedHash.toLowerCase();
+    });
+  } catch { return false; }
+}
+
+/** Activate a verified update only during startup, before the server uses appDir as cwd. */
+function activatePendingUpdate(updateRoot) {
+  const safeRoot = path.resolve(updateRoot);
+  const pendingDir = path.join(safeRoot, 'app-pending');
+  const appDir = path.join(safeRoot, 'app');
+  if (!fs.existsSync(pendingDir)) return { updated: false };
+  if (!isValidUpdateDirectory(pendingDir)) {
+    const rejectedDir = path.join(safeRoot, `app-rejected-${Date.now()}`);
+    try { fs.renameSync(pendingDir, rejectedDir); }
+    catch { fs.rmSync(pendingDir, { recursive: true, force: true }); }
+    return { updated: false, invalid: true };
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(pendingDir, 'version.json'), 'utf8'));
+  const previousDir = path.join(safeRoot, `app-previous-${manifest.version}-${process.pid}`);
+  let movedOld = false;
+  try {
+    if (fs.existsSync(appDir)) {
+      fs.renameSync(appDir, previousDir);
+      movedOld = true;
+    }
+    fs.renameSync(pendingDir, appDir);
+    if (!isValidUpdateDirectory(appDir)) throw new Error('Etkinleştirilen güncelleme doğrulanamadı.');
+    return { updated: true, version: manifest.version, previousDir: movedOld ? previousDir : '' };
+  } catch (error) {
+    try {
+      if (movedOld && fs.existsSync(appDir)) fs.rmSync(appDir, { recursive: true, force: true });
+      if (movedOld && fs.existsSync(previousDir) && !fs.existsSync(appDir)) fs.renameSync(previousDir, appDir);
+    } catch { /* keep original error; backup remains for manual recovery */ }
+    throw error;
+  }
+}
+
+module.exports = { stageRemoteUpdate, activatePendingUpdate, isValidUpdateDirectory };

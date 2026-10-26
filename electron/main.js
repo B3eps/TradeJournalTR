@@ -21,7 +21,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Module = require('module');
 const { waitForServer } = require('./boot-health');
-const { stageRemoteUpdate } = require('./remote-updates');
+const { stageRemoteUpdate, activatePendingUpdate } = require('./remote-updates');
 
 
 const PORT = 8471;
@@ -310,7 +310,10 @@ async function checkRemoteUpdates() {
       updateRoot: app.getPath('userData'),
       currentVersion: getBundledUpdateVersion(),
     });
-    if (!result.updated) return { status: 'current', version: result.version || getInstalledVersion() };
+    if (!result.updated) return {
+      status: result.pending ? 'staged' : 'current',
+      version: result.version || getInstalledVersion(),
+    };
     logRun(`uzak guncelleme hazir surum=${result.version}`);
     if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return { status: 'staged', version: result.version };
     const choice = await dialog.showMessageBox(mainWindow, {
@@ -593,6 +596,17 @@ function startServer() {
 
 app.whenReady().then(async () => {
   try {
+    // The update directory may be the old process cwd while the app is running.
+    // Switch to the stable user-data root before applying a staged directory swap.
+    const userDataRoot = app.getPath('userData');
+    process.chdir(userDataRoot);
+    try {
+      const activated = activatePendingUpdate(userDataRoot);
+      if (activated.updated) logRun(`uzak guncelleme etkin surum=${activated.version}`);
+      else if (activated.invalid) logRun('hazir guncelleme bozuk bulundu; eski surum korunuyor');
+    } catch (error) {
+      logRun(`uzak guncelleme etkinlestirilemedi; eski surum korunuyor: ${error && error.message ? error.message : error}`);
+    }
     logRun('baslangic: pencere hazirlaniyor');
     iconPath = path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'), 'public', 'assets', 'img', 'favicon.png');
     createWindow(START_HIDDEN);
