@@ -337,7 +337,13 @@ const findAmbiguousCommaValues = (rows, columns) => {
   for (let i = 0; i < rows.length; i++) {
     for (const column of columns.filter(Boolean)) {
       const value = rows[i]?.[column];
-      if (typeof value === 'string' && pattern.test(value.trim())) {
+      if (typeof value === 'string') {
+        const normalized = value.trim()
+          .replace(/^\((.*)\)$/, '$1')
+          .replace(/[−–]/g, '-')
+          .replace(/[\s  ']/g, '')
+          .replace(/[^0-9.,\-]/g, '');
+        if (!pattern.test(normalized)) continue;
         count++;
         if (samples.length < 5) samples.push({ record: i + 1, column, value: value.trim() });
       }
