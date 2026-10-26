@@ -145,7 +145,8 @@ const SEVIYE_VALUES = ['düşük', 'orta', 'yüksek'] as const satisfies readonl
 /** Strict shape validation for JSON pasted from an external AI; sanitizing still follows. */
 export const evaluationInputSchema = z.object({
   id: z.string().regex(/^[0-9a-f]{16}$/),
-  evaluatedAt: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+  evaluatedAt: z.string().refine((value) =>
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))),
   ozet: z.string().min(1),
   onem: z.number().int().min(1).max(5),
   etkilenen: z.array(z.object({
