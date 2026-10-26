@@ -745,7 +745,7 @@ tradovate.post(
     }
 
     if (!Array.isArray(selectedAccounts)) {
-      return c.json({ error: 'selectedAccounts must be an array' }, 400);
+      return c.json({ error: 'Seçili hesaplar liste biçiminde olmalıdır.' }, 400);
     }
 
     const serviceClient = getDb();

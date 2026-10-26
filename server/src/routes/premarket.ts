@@ -18,7 +18,7 @@ premarket.get('/api/premarket/checklist', requiresLogin, async (c) => {
   const date = c.req.query('date');
 
   if (!date) {
-    return c.json({ error: 'date query param is required' }, 400);
+    return c.json({ error: 'Tarih parametresi zorunludur.' }, 400);
   }
 
   try {
@@ -31,7 +31,7 @@ premarket.get('/api/premarket/checklist', requiresLogin, async (c) => {
     return c.json({ items, completions, settings });
   } catch (err) {
     console.error('getChecklist error:', err);
-    return c.json({ error: 'Failed to fetch checklist' }, 500);
+    return c.json({ error: 'Kontrol listesi alınamadı.' }, 500);
   }
 });
 
@@ -52,7 +52,7 @@ premarket.get('/api/premarket/consistency', requiresLogin, async (c) => {
     return c.json({ completionsByDate });
   } catch (err) {
     console.error('getConsistency error:', err);
-    return c.json({ error: 'Failed to fetch consistency' }, 500);
+    return c.json({ error: 'Tutarlılık verileri alınamadı.' }, 500);
   }
 });
 
@@ -64,7 +64,7 @@ premarket.post('/api/premarket/checklist', requiresLogin, async (c) => {
   const { label, sortOrder } = body;
 
   if (!label) {
-    return c.json({ error: 'label is required' }, 400);
+    return c.json({ error: 'Kontrol adı zorunludur.' }, 400);
   }
 
   try {
@@ -75,7 +75,7 @@ premarket.post('/api/premarket/checklist', requiresLogin, async (c) => {
     return c.json(item);
   } catch (err) {
     console.error('createChecklistItem error:', err);
-    return c.json({ error: 'Failed to create item' }, 500);
+    return c.json({ error: 'Kontrol oluşturulamadı.' }, 500);
   }
 });
 
@@ -91,7 +91,7 @@ premarket.put('/api/premarket/checklist/:id', requiresLogin, async (c) => {
     return c.json(item);
   } catch (err) {
     console.error('updateChecklistItem error:', err);
-    return c.json({ error: 'Failed to update item' }, 500);
+    return c.json({ error: 'Kontrol güncellenemedi.' }, 500);
   }
 });
 
@@ -106,7 +106,7 @@ premarket.delete('/api/premarket/checklist/:id', requiresLogin, async (c) => {
     return c.json({ message: 'Item deleted' });
   } catch (err) {
     console.error('deleteChecklistItem error:', err);
-    return c.json({ error: 'Failed to delete item' }, 500);
+    return c.json({ error: 'Kontrol silinemedi.' }, 500);
   }
 });
 
@@ -118,7 +118,7 @@ premarket.post('/api/premarket/checklist/reorder', requiresLogin, async (c) => {
   const { orderedIds } = body;
 
   if (!Array.isArray(orderedIds)) {
-    return c.json({ error: 'orderedIds array is required' }, 400);
+    return c.json({ error: 'Sıralı kontrol kimlikleri listesi zorunludur.' }, 400);
   }
 
   try {
@@ -126,7 +126,7 @@ premarket.post('/api/premarket/checklist/reorder', requiresLogin, async (c) => {
     return c.json({ message: 'Reordered' });
   } catch (err) {
     console.error('reorderChecklist error:', err);
-    return c.json({ error: 'Failed to reorder' }, 500);
+    return c.json({ error: 'Kontroller yeniden sıralanamadı.' }, 500);
   }
 });
 
@@ -146,7 +146,7 @@ premarket.post('/api/premarket/checklist/toggle', requiresLogin, async (c) => {
     return c.json(result);
   } catch (err) {
     console.error('toggleCompletion error:', err);
-    return c.json({ error: 'Failed to toggle' }, 500);
+    return c.json({ error: 'Kontrol durumu değiştirilemedi.' }, 500);
   }
 });
 
@@ -166,7 +166,7 @@ premarket.post('/api/premarket/settings', requiresLogin, async (c) => {
     return c.json(settings);
   } catch (err) {
     console.error('upsertSettings error:', err);
-    return c.json({ error: 'Failed to save settings' }, 500);
+    return c.json({ error: 'Ayarlar kaydedilemedi.' }, 500);
   }
 });
 
@@ -182,7 +182,7 @@ premarket.post('/api/premarket/webhook', requiresLogin, async (c) => {
     if (webhookUrl && webhookUrl.trim()) {
       const url = webhookUrl.trim();
       if (!url.startsWith('https://discord.com/api/webhooks/')) {
-        return c.json({ error: 'Invalid Discord webhook URL' }, 400);
+        return c.json({ error: 'Discord webhook adresi geçersiz.' }, 400);
       }
       encryptedUrl = await encrypt(url, c.env.ENCRYPTION_KEY);
     }
@@ -191,7 +191,7 @@ premarket.post('/api/premarket/webhook', requiresLogin, async (c) => {
     return c.json(settings);
   } catch (err) {
     console.error('saveWebhook error:', err);
-    return c.json({ error: 'Failed to save webhook' }, 500);
+    return c.json({ error: 'Webhook kaydedilemedi.' }, 500);
   }
 });
 
@@ -205,7 +205,7 @@ premarket.delete('/api/premarket/webhook', requiresLogin, async (c) => {
     return c.json(settings);
   } catch (err) {
     console.error('deleteWebhook error:', err);
-    return c.json({ error: 'Failed to remove webhook' }, 500);
+    return c.json({ error: 'Webhook kaldırılamadı.' }, 500);
   }
 });
 
@@ -214,7 +214,7 @@ premarket.get('/api/premarket/news', requiresLogin, async (c) => {
   const db = c.get('db');
   const date = c.req.query('date');
   if (!date) {
-    return c.json({ error: 'date query param is required' }, 400);
+    return c.json({ error: 'Tarih parametresi zorunludur.' }, 400);
   }
 
   try {
@@ -222,7 +222,7 @@ premarket.get('/api/premarket/news', requiresLogin, async (c) => {
     return c.json({ events });
   } catch (err) {
     console.error('getEconomicEvents error:', err);
-    return c.json({ events: [], error: 'Failed to fetch economic events' });
+    return c.json({ events: [], error: 'Ekonomik takvim verileri alınamadı.' });
   }
 });
 

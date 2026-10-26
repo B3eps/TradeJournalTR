@@ -305,10 +305,10 @@ trade.post('/api/bulkUpdateTrades', requiresLogin, async (c) => {
   const body = await c.req.json();
 
   if (!body.tradeIds || !Array.isArray(body.tradeIds) || body.tradeIds.length === 0) {
-    return c.json({ error: 'tradeIds array is required!' }, 400);
+    return c.json({ error: 'İşlem kimliklerinin listesi zorunludur.' }, 400);
   }
   if (!body.action) {
-    return c.json({ error: 'action is required!' }, 400);
+    return c.json({ error: 'Toplu işlem türü zorunludur.' }, 400);
   }
 
   try {
@@ -341,7 +341,7 @@ trade.post('/api/bulkDeleteTrades', requiresLogin, async (c) => {
   const body = await c.req.json();
 
   if (!body.tradeIds || !Array.isArray(body.tradeIds) || body.tradeIds.length === 0) {
-    return c.json({ error: 'tradeIds array is required!' }, 400);
+    return c.json({ error: 'İşlem kimliklerinin listesi zorunludur.' }, 400);
   }
 
   try {
