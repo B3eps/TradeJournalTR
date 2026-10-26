@@ -135,7 +135,7 @@ const makeTradeHandler = async (c: any) => {
   const db = c.get('db');
   const body = await c.req.json();
   const validation = validateTradeInput(body);
-  if (validation.error) return c.json({ error: validation.error }, 400);
+  if (validation.error !== null) return c.json({ error: validation.error }, 400);
   const input = validation.value;
 
   try {
@@ -188,7 +188,7 @@ trade.post('/api/updateTrade', requiresLogin, async (c) => {
   }
 
   const validation = validateTradeInput(body);
-  if (validation.error) return c.json({ error: validation.error }, 400);
+  if (validation.error !== null) return c.json({ error: validation.error }, 400);
   const input = validation.value;
 
   try {

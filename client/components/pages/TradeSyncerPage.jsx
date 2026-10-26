@@ -128,6 +128,7 @@ const LOG_STATUS_LABELS = {
   uncertain: 'kontrol gerekli',
   failed: 'başarısız',
   cancelled: 'iptal edildi',
+  not_placed: 'brokerda bulunmadı',
 };
 
 // Display labels for session action types
@@ -160,7 +161,10 @@ const ConnectionStatus = ({ status }) => {
 
 // ─── Order Log ───────────────────────────────────────────────────────────────
 
-const OrderLog = ({ logs }) => {
+const OrderLog = ({ logs, onReconcile }) => {
+  const [orderIds, setOrderIds] = useState({});
+  const [notes, setNotes] = useState({});
+  const [busyId, setBusyId] = useState(null);
   if (!logs || logs.length === 0) return null;
   const hasUncertain = logs.some((log) => log.status === 'uncertain' || log.status === 'pending');
 
@@ -171,6 +175,7 @@ const OrderLog = ({ logs }) => {
     uncertain: 'text-warning',
     failed: 'text-negative',
     cancelled: 'text-text-muted',
+    not_placed: 'text-text-muted',
   };
 
   return (
@@ -202,7 +207,34 @@ const OrderLog = ({ logs }) => {
               </span>
             </div>
             {log.error_message && (
-              <div className="text-negative mt-1 break-all font-mono text-[10px]">{log.error_message}</div>
+              <div className={`${log.status === 'not_placed' ? 'text-text-muted' : 'text-negative'} mt-1 break-all font-mono text-[10px]`}>{log.error_message}</div>
+            )}
+            {(log.status === 'pending' || log.status === 'uncertain') && (
+              <div className="mt-2 ml-16 rounded border border-warning/30 p-2 space-y-2">
+                <p className="text-warning">Demo hesabında emri elle kontrol edin. Bu işlem brokerda emir oluşturmaz.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input aria-label="Takipçi broker emir kimliği" type="number" min="1" step="1"
+                    value={orderIds[log.id] || ''} onChange={(e) => setOrderIds((v) => ({ ...v, [log.id]: e.target.value }))}
+                    placeholder="Broker emir ID" className="w-36 px-2 py-1 bg-bg-input border border-border rounded text-text-primary" />
+                  <button disabled={busyId === log.id || !orderIds[log.id]} onClick={async () => {
+                    if (!window.confirm('Bu emir kimliğini demo broker hesabında kontrol ettiğinizi onaylıyor musunuz? Sistem emir göndermeden broker kaydını doğrulayacak.')) return;
+                    setBusyId(log.id);
+                    try { await onReconcile(log.id, { decision: 'found', followerOrderId: Number(orderIds[log.id]) }); }
+                    finally { setBusyId(null); }
+                  }} className="px-2 py-1 rounded bg-positive/15 text-positive disabled:opacity-50">Brokerda bulundu</button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input aria-label="Brokerda bulunamadı kontrol notu" value={notes[log.id] || ''}
+                    onChange={(e) => setNotes((v) => ({ ...v, [log.id]: e.target.value }))}
+                    placeholder="Kontrol notu" className="min-w-48 flex-1 px-2 py-1 bg-bg-input border border-border rounded text-text-primary" />
+                  <button disabled={busyId === log.id || !(notes[log.id] || '').trim()} onClick={async () => {
+                    if (!window.confirm('Demo broker hesabında bu emri bulamadığınızı ve kaydın not_placed olarak kapatılmasını onaylıyor musunuz? Bu kayıt için otomatik yeniden emir gönderilmeyecektir.')) return;
+                    setBusyId(log.id);
+                    try { await onReconcile(log.id, { decision: 'not_found', confirmed: true, note: notes[log.id] }); }
+                    finally { setBusyId(null); }
+                  }} className="px-2 py-1 rounded bg-bg-elevated text-text-secondary disabled:opacity-50">Brokerda yok</button>
+                </div>
+              </div>
             )}
           </div>
         ))}
@@ -592,7 +624,22 @@ const TradeSyncerPage = () => {
     }
   }, []);
 
+  const reconcileLog = useCallback(async (logId, payload) => {
+    try {
+      const res = await authFetch('/api/syncer/reconcile', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logId, ...payload }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Uzlaştırma başarısız.');
+      await fetchLogs();
+    } catch (err) {
+      setError(err.message || 'Kayıt uzlaştırılamadı.');
+    }
+  }, [fetchLogs]);
+
   useEffect(() => {
+    fetchLogs();
     if (!isActive) {
       if (logsIntervalRef.current) {
         clearInterval(logsIntervalRef.current);
@@ -600,8 +647,6 @@ const TradeSyncerPage = () => {
       }
       return;
     }
-
-    fetchLogs();
     logsIntervalRef.current = setInterval(fetchLogs, 10000);
 
     return () => {
@@ -818,7 +863,7 @@ const TradeSyncerPage = () => {
       )}
 
       {/* Order Log (from server) */}
-      <OrderLog logs={logs} />
+      <OrderLog logs={logs} onReconcile={reconcileLog} />
     </div>
   );
 };

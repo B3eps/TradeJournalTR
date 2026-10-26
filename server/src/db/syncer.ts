@@ -149,13 +149,22 @@ export function claimMirrorOrder(
   configId: string,
   leaderOrderId: number,
   followerAccountId: number,
+  details: {
+    leaderAction: string;
+    leaderSymbol: string;
+    leaderQty: number;
+    followerQty: number;
+    orderType: string;
+  },
 ): boolean {
   const result = db.prepare(
     `INSERT INTO syncer_order_log
-      (id, config_id, leader_order_id, follower_account_id, status, created_at)
-     VALUES (?, ?, ?, ?, 'pending', ?)
+      (id, config_id, leader_order_id, leader_action, leader_symbol, leader_qty,
+       follower_account_id, follower_qty, order_type, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
      ON CONFLICT(config_id, leader_order_id, follower_account_id) DO NOTHING`,
-  ).run(generateId(), configId, leaderOrderId, followerAccountId, new Date().toISOString());
+  ).run(generateId(), configId, leaderOrderId, details.leaderAction, details.leaderSymbol,
+    details.leaderQty, followerAccountId, details.followerQty, details.orderType, new Date().toISOString());
   return result.changes === 1;
 }
 
@@ -166,8 +175,41 @@ export async function getRecentLogs(
 ): Promise<SyncerOrderLogRow[]> {
   const rows = db
     .prepare('SELECT * FROM syncer_order_log WHERE config_id = ? ORDER BY created_at DESC LIMIT ?')
-    .all(configId, limit);
-  return rows as SyncerOrderLogRow[];
+    .all(configId, Math.max(1, Math.min(500, limit)));
+  const unresolved = db
+    .prepare("SELECT * FROM syncer_order_log WHERE config_id = ? AND status IN ('pending', 'uncertain') ORDER BY created_at DESC LIMIT 500")
+    .all(configId);
+  const byId = new Map<string, SyncerOrderLogRow>();
+  for (const row of [...rows, ...unresolved]) byId.set((row as any).id, row as SyncerOrderLogRow);
+  return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** Resolve only an outstanding reservation. The unique reservation row is retained. */
+export async function reconcileOrder(
+  db: Db,
+  configId: string,
+  logId: string,
+  status: 'placed' | 'filled' | 'failed' | 'cancelled' | 'not_placed',
+  options: { followerOrderId?: number; note?: string } = {},
+): Promise<boolean> {
+  const result = db.prepare(
+    `UPDATE syncer_order_log SET status = ?,
+       follower_order_id = CASE WHEN ? IS NULL THEN follower_order_id ELSE ? END,
+       error_message = ?
+     WHERE id = ? AND config_id = ? AND status IN ('pending', 'uncertain')`,
+  ).run(status, options.followerOrderId ?? null, options.followerOrderId ?? null,
+    options.note ?? null, logId, configId);
+  return result.changes === 1;
+}
+
+export async function findLogById(
+  db: Db,
+  configId: string,
+  logId: string,
+): Promise<SyncerOrderLogRow | null> {
+  const row = db.prepare('SELECT * FROM syncer_order_log WHERE config_id = ? AND id = ?')
+    .get(configId, logId);
+  return (row as SyncerOrderLogRow) || null;
 }
 
 export async function findFollowerOrders(

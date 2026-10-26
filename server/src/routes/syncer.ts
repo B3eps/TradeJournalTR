@@ -321,7 +321,13 @@ syncer.post('/api/syncer/mirror', async (c) => {
           }
           // The unique DB reservation is atomic across duplicate requests.
           // Never automatically retry failed or uncertain broker calls.
-          if (!syncerDb.claimMirrorOrder(db, config.id, body.leaderOrderId, follower.accountId)) continue;
+          if (!syncerDb.claimMirrorOrder(db, config.id, body.leaderOrderId, follower.accountId, {
+            leaderAction: fullOrder.action,
+            leaderSymbol: symbol,
+            leaderQty: orderQty,
+            followerQty: mirroredQty,
+            orderType,
+          })) continue;
 
           try {
             const orderParams: any = {
@@ -582,6 +588,88 @@ syncer.get('/api/syncer/account-status', async (c) => {
 });
 
 // ─── GET /api/syncer/logs ────────────────────────────────────────────────────
+
+// Manual reconciliation never submits, cancels, or changes a broker order.
+syncer.post('/api/syncer/reconcile', async (c) => {
+  const user = c.get('user');
+  const db = c.get('db');
+  try {
+    const body = await c.req.json() as {
+      logId?: string; decision?: string; followerOrderId?: number; confirmed?: boolean; note?: string;
+    };
+    if (typeof body.logId !== 'string' || !body.logId) return c.json({ error: 'Geçersiz kayıt.' }, 400);
+    const config = await syncerDb.getConfig(db, user.id);
+    if (!config) return c.json({ error: 'Eşitleyici ayarı bulunamadı.' }, 404);
+    const log = await syncerDb.findLogById(db, config.id, body.logId);
+    if (!log || !['pending', 'uncertain'].includes(log.status)) {
+      return c.json({ error: 'Kayıt artık uzlaştırılabilir durumda değil.' }, 409);
+    }
+
+    if (body.decision === 'not_found') {
+      if (body.confirmed !== true) return c.json({ error: 'Brokerda olmadığı açıkça onaylanmalıdır.' }, 400);
+      const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+      if (!note) return c.json({ error: 'Lütfen kontrol notu girin.' }, 400);
+      const changed = await syncerDb.reconcileOrder(db, config.id, log.id, 'not_placed', { note });
+      if (!changed) return c.json({ error: 'Kayıt başka bir işlemle uzlaştırıldı.' }, 409);
+      return c.json({ ok: true });
+    }
+
+    if (body.decision !== 'found' || !positiveId(body.followerOrderId)) {
+      return c.json({ error: 'Takipçi broker emir kimliği geçersiz.' }, 400);
+    }
+    const matchingFollowers = config.follower_accounts.filter((item) => item.accountId === log.follower_account_id);
+    if (matchingFollowers.length !== 1) {
+      return c.json({ error: 'Takipçi hesabı yapılandırmada tekil olarak doğrulanamadı.' }, 403);
+    }
+    const follower = matchingFollowers[0];
+    const owned = await brokerDb.findByOwnerAndBroker(db, user.id, 'tradovate');
+    const connection = owned.find((item) => item.id === follower.connectionId);
+    if (!connection || connection.environment !== 'demo') {
+      return c.json({ error: 'Uzlaştırma yalnızca kullanıcının sahip olduğu demo bağlantısında yapılabilir.' }, 403);
+    }
+    const auth = await ensureFreshToken(c.env, follower.connectionId);
+    if (auth.environment !== 'demo') return c.json({ error: 'Demo bağlantısı doğrulanamadı.' }, 403);
+    const accounts = await auth.api.getAccounts(auth.token) as any[];
+    if (!accounts.some((account) => account.id === follower.accountId)) {
+      return c.json({ error: 'Takipçi hesabı bu broker bağlantısında doğrulanamadı.' }, 403);
+    }
+    const order = await auth.api.getOrderItem(auth.token, body.followerOrderId);
+    if (order.id !== body.followerOrderId || order.accountId !== follower.accountId
+      || !log.leader_action || order.action !== log.leader_action
+      || !positiveId(log.follower_qty) || order.orderQty !== log.follower_qty
+      || !log.order_type || order.ordType !== log.order_type
+      || !positiveId(order.contractId) || !log.leader_symbol) {
+      return c.json({ error: 'Broker emri kimlik, hesap, yön veya miktar bakımından kayıtla eşleşmiyor.' }, 409);
+    }
+    const contracts = await auth.api.getContractItems(auth.token, [order.contractId]);
+    if (contracts.length !== 1 || contracts[0].id !== order.contractId || contracts[0].name !== log.leader_symbol) {
+      return c.json({ error: 'Broker emrinin sözleşmesi kayıtla eşleşmiyor.' }, 409);
+    }
+    let status: 'placed' | 'filled' | 'failed' | 'cancelled';
+    let note: string | undefined;
+    if (order.ordStatus === 'Filled') {
+      status = 'filled';
+    } else if (['Working', 'Accepted', 'PartiallyFilled'].includes(order.ordStatus)) {
+      status = 'placed';
+    } else if (['Canceled', 'Cancelled'].includes(order.ordStatus)) {
+      status = 'cancelled';
+    } else if (['Rejected', 'Failed'].includes(order.ordStatus)) {
+      status = 'failed';
+      note = `Broker emri ${order.ordStatus} durumunda; yeniden emir gönderilmedi.`;
+    } else {
+      return c.json({ error: `Broker emir durumu (${order.ordStatus || 'bilinmiyor'}) henüz güvenle uzlaştırılamıyor; kayıt açık kaldı.` }, 409);
+    }
+    const changed = await syncerDb.reconcileOrder(db, config.id, log.id, status, {
+      followerOrderId: order.id,
+      note,
+    });
+    if (!changed) return c.json({ error: 'Kayıt başka bir işlemle uzlaştırıldı.' }, 409);
+    return c.json({ ok: true, status });
+  } catch (err: any) {
+    console.error('syncer reconcile error:', err);
+    return c.json({ error: 'Kayıt broker bilgileriyle uzlaştırılamadı.' }, 500);
+  }
+});
 
 syncer.get('/api/syncer/logs', async (c) => {
   const user = c.get('user');

@@ -160,6 +160,8 @@ export interface SyncerOrderLogRow {
   leader_qty: number | null;
   follower_account_id: number;
   follower_order_id: number | null;
+  follower_qty: number | null;
+  order_type: string | null;
   status: string;
   error_message: string | null;
   created_at: string;
