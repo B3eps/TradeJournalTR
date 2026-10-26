@@ -1,0 +1,101 @@
+{
+    "name": "trade-gunlugu",
+    "version": "1.0.0",
+    "description": "Trade Günlüğü - Türkçe, forex uyumlu trade günlüğü (RR Metrics türevi)",
+    "main": "electron/main.js",
+    "author": "temir",
+    "license": "Apache-2.0",
+    "scripts": {
+        "build": "webpack",
+        "start": "tsx server/src/node.ts",
+        "bundle": "esbuild server/src/node.ts --bundle --platform=node --format=cjs --external:better-sqlite3 --external:dukascopy-node --external:playwright-core --outfile=electron/server.cjs",
+        "seed-demo": "tsx server/scripts/seed-demo.ts",
+        "dist": "npm run build && npm run bundle && electron-builder --win portable"
+    },
+    "dependencies": {
+        "@tiptap/extension-link": "^3.32.0",
+        "@tiptap/extension-placeholder": "^3.32.0",
+        "@tiptap/extension-task-item": "^3.32.0",
+        "@tiptap/extension-task-list": "^3.32.0",
+        "@tiptap/markdown": "^3.32.0",
+        "@tiptap/pm": "^3.32.0",
+        "@tiptap/react": "^3.32.0",
+        "@tiptap/starter-kit": "^3.32.0",
+        "@tiptap/suggestion": "^3.32.0",
+        "@xyflow/react": "^12.12.0",
+        "better-sqlite3": "^12.11.1",
+        "dukascopy-node": "^1.51.0",
+        "lightweight-charts": "^5.2.1",
+        "sonner": "^2.0.8",
+        "tiptap-markdown": "^0.9.0",
+        "ts-fsrs": "^5.4.2"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.28.5",
+        "@babel/preset-react": "^7.28.5",
+        "@hono/node-server": "^1.14.0",
+        "@radix-ui/react-avatar": "^1.1.11",
+        "@radix-ui/react-popover": "^1.1.15",
+        "@types/bcryptjs": "^2.4.6",
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.13.0",
+        "autoprefixer": "^10.4.24",
+        "babel-loader": "^10.0.0",
+        "bcryptjs": "^2.4.3",
+        "class-variance-authority": "^0.7.1",
+        "clsx": "^2.1.1",
+        "css-loader": "^7.1.3",
+        "dotenv": "^17.2.3",
+        "electron": "^41.10.7",
+        "electron-builder": "^26.18.0",
+        "eslint": "^8.57.1",
+        "eslint-config-airbnb": "^19.0.4",
+        "eslint-plugin-import": "^2.32.0",
+        "framer-motion": "^12.34.3",
+        "helmet": "^8.1.0",
+        "hono": "^4.12.12",
+        "html-to-image": "^1.11.13",
+        "lucide-react": "^1.6.0",
+        "mini-css-extract-plugin": "^2.10.0",
+        "papaparse": "^5.5.3",
+        "postcss": "^8.5.6",
+        "postcss-loader": "^8.2.0",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+        "style-loader": "^4.0.0",
+        "tailwind-merge": "^3.5.0",
+        "tailwindcss": "^3.4.19",
+        "tsx": "^4.19.0",
+        "typescript": "^5.7.0",
+        "webpack": "^5.102.1",
+        "webpack-cli": "^6.0.1"
+    },
+    "build": {
+        "appId": "com.temir.tradegunlugu",
+        "productName": "Trade Günlüğü",
+        "directories": {
+            "output": "dist-app"
+        },
+        "files": [
+            "electron/**",
+            "package.json"
+        ],
+        "extraResources": [
+            {
+                "to": "public",
+                "from": "public"
+            }
+        ],
+        "win": {
+            "target": "portable",
+            "signAndEditExecutable": false
+        },
+        "portable": {
+            "artifactName": "Trade-Gunlugu.exe"
+        },
+        "asarUnpack": [
+            "**/node_modules/better-sqlite3/**"
+        ],
+        "npmRebuild": false
+    }
+}

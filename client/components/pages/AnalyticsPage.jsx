@@ -1,0 +1,983 @@
+const React = require("react");
+const { useState, useEffect, useRef, useMemo } = React;
+
+const { getTradePL, calculateAnalytics, applyEvalFilter, calculateSharpeRatio, calculateSortinoRatio, calculateKellyCriterion, runMonteCarloSimulation } = require("../../utils/analytics");
+const { formatDuration, toEST } = require("../../utils/dateUtils");
+const { formatMoney } = require("../../utils/format");
+const { getCSSVar, colorToRgba, drawTooltip } = require("../../utils/chartUtils");
+const { getDateRange, getPreviousDateRange, filterTradesByDateRange, calcPercentChange } = require("../../utils/periodUtils");
+
+const StatCard = require("../shared/StatCard");
+const ChangeIndicator = require("../shared/ChangeIndicator");
+const WinRateCard = require("../shared/WinRateCard");
+const PeriodFilter = require("../shared/PeriodFilter");
+const EvalFilterControl = require("../shared/EvalFilterControl");
+
+
+
+const AnalyticsPage = ({ trades: allTrades, evalFilter, setEvalFilter }) => {
+  const canvasRef = useRef(null);
+  const barCanvasRef = useRef(null);
+  const timeCanvasRef = useRef(null);
+  const monteCarloCanvasRef = useRef(null);
+  const dayBarRects = useRef([]);
+  const timeBarRects = useRef([]);
+  const [hoveredDayIndex, setHoveredDayIndex] = useState(null);
+  const [hoveredTimeIndex, setHoveredTimeIndex] = useState(null);
+  const [showTimeTable, setShowTimeTable] = useState(false);
+  const [dayPLMode, setDayPLMode] = useState('total');
+  const [timePLMode, setTimePLMode] = useState('avg');
+  const [period, setPeriod] = useState('all');
+  const [kellyDrawdown, setKellyDrawdown] = useState(2000);
+
+  const baseTradesForPeriod = applyEvalFilter(allTrades, evalFilter);
+  const dateRange = getDateRange(period);
+  const trades = filterTradesByDateRange(baseTradesForPeriod, dateRange);
+  const stats = calculateAnalytics(trades);
+
+  const prevRange = getPreviousDateRange(period);
+  const prevTrades = prevRange ? filterTradesByDateRange(baseTradesForPeriod, prevRange) : null;
+  const prevStats = prevTrades ? calculateAnalytics(prevTrades) : null;
+  const showChange = period !== 'all' && prevStats;
+
+  // Cumulative P/L chart
+  useEffect(() => {
+    if (!canvasRef.current || trades.length === 0) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 300 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '300px';
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = 300;
+    const padding = { top: 30, right: 20, bottom: 40, left: 60 };
+
+    const sorted = [...trades].sort((a, b) => new Date(a.exitTime) - new Date(b.exitTime));
+    const cumPL = [];
+    let running = 0;
+    sorted.forEach(t => {
+      const pl = getTradePL(t);
+      running += pl;
+      cumPL.push(running);
+    });
+
+    const minPL = Math.min(0, ...cumPL);
+    const maxPL = Math.max(0, ...cumPL);
+    const range = maxPL - minPL || 1;
+
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    const bgSurface = getCSSVar('--bg-surface');
+    const borderColor = getCSSVar('--border');
+    const textTertiary = getCSSVar('--text-tertiary');
+    const textMuted = getCSSVar('--text-muted');
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = bgSurface;
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    const gridLines = 5;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = padding.top + (chartH / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(w - padding.right, y);
+      ctx.stroke();
+
+      const val = maxPL - (range / gridLines) * i;
+      ctx.fillStyle = textTertiary;
+      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('$' + val.toFixed(0), padding.left - 8, y + 4);
+    }
+
+    // Zero line
+    if (minPL < 0) {
+      const zeroY = padding.top + ((maxPL - 0) / range) * chartH;
+      ctx.strokeStyle = textMuted;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, zeroY);
+      ctx.lineTo(w - padding.right, zeroY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Line — color green above zero, red below zero
+    if (cumPL.length > 1) {
+      const posColor = getCSSVar('--positive');
+      const negColor = getCSSVar('--negative');
+      const zeroY = padding.top + ((maxPL - 0) / range) * chartH;
+
+      // Build point coordinates
+      const points = cumPL.map((val, i) => ({
+        x: padding.left + (chartW / (cumPL.length - 1)) * i,
+        y: padding.top + ((maxPL - val) / range) * chartH,
+      }));
+
+      // Helper: trace the equity line path
+      const traceLine = () => {
+        ctx.beginPath();
+        points.forEach((p, i) => {
+          if (i === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+      };
+
+      // Draw above-zero portion (green)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(padding.left, padding.top, chartW, zeroY - padding.top);
+      ctx.clip();
+
+      traceLine();
+      ctx.strokeStyle = posColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Fill above-zero
+      traceLine();
+      const lastX = points[points.length - 1].x;
+      ctx.lineTo(lastX, zeroY);
+      ctx.lineTo(points[0].x, zeroY);
+      ctx.closePath();
+      const posGrad = ctx.createLinearGradient(0, padding.top, 0, zeroY);
+      posGrad.addColorStop(0, colorToRgba(posColor, 0.15));
+      posGrad.addColorStop(1, colorToRgba(posColor, 0));
+      ctx.fillStyle = posGrad;
+      ctx.fill();
+      ctx.restore();
+
+      // Draw below-zero portion (red)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(padding.left, zeroY, chartW, h - padding.bottom - zeroY);
+      ctx.clip();
+
+      traceLine();
+      ctx.strokeStyle = negColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Fill below-zero
+      traceLine();
+      ctx.lineTo(lastX, zeroY);
+      ctx.lineTo(points[0].x, zeroY);
+      ctx.closePath();
+      const negGrad = ctx.createLinearGradient(0, zeroY, 0, h - padding.bottom);
+      negGrad.addColorStop(0, colorToRgba(negColor, 0));
+      negGrad.addColorStop(1, colorToRgba(negColor, 0.15));
+      ctx.fillStyle = negGrad;
+      ctx.fill();
+      ctx.restore();
+    }
+  }, [trades, document.documentElement.dataset.theme]);
+
+  // Performance by day bar chart
+  useEffect(() => {
+    if (!barCanvasRef.current || trades.length === 0) return;
+
+    const canvas = barCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 250 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '250px';
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = 250;
+    const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+
+    const dayNames = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+    const dayPL = [0, 0, 0, 0, 0, 0, 0];
+    const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+    const dayWins = [0, 0, 0, 0, 0, 0, 0];
+    const dayLosses = [0, 0, 0, 0, 0, 0, 0];
+    const dayWinPL = [0, 0, 0, 0, 0, 0, 0];
+    const dayLossPL = [0, 0, 0, 0, 0, 0, 0];
+
+    trades.forEach(t => {
+      const estDate = toEST(t.exitTime);
+      const day = new Date(estDate.year, estDate.month - 1, estDate.day).getDay();
+      const pl = getTradePL(t);
+      dayPL[day] += pl;
+      dayCounts[day]++;
+      if (pl > 0) { dayWins[day]++; dayWinPL[day] += pl; }
+      else { dayLosses[day]++; dayLossPL[day] += Math.abs(pl); }
+    });
+
+    const dayValues = dayPLMode === 'avg'
+      ? dayPL.map((pl, i) => dayCounts[i] > 0 ? pl / dayCounts[i] : 0)
+      : dayPL;
+    const maxVal = Math.max(...dayValues.map(Math.abs), 1);
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    const bgSurface = getCSSVar('--bg-surface');
+    const textMuted = getCSSVar('--text-muted');
+    const textTertiary = getCSSVar('--text-tertiary');
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = bgSurface;
+    ctx.fillRect(0, 0, w, h);
+
+    // Zero line
+    const zeroY = padding.top + chartH / 2;
+    ctx.strokeStyle = textMuted;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, zeroY);
+    ctx.lineTo(w - padding.right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const barWidth = chartW / 7 * 0.6;
+    const barGap = chartW / 7;
+    const rects = [];
+
+    const dayPosColor = getCSSVar('--positive');
+    const dayNegColor = getCSSVar('--negative');
+
+    // Draw hover background first (behind bars)
+    if (hoveredDayIndex !== null) {
+      ctx.fillStyle = colorToRgba(getCSSVar('--text-primary'), 0.04);
+      ctx.fillRect(padding.left + barGap * hoveredDayIndex, padding.top, barGap, chartH);
+    }
+
+    dayValues.forEach((val, i) => {
+      const x = padding.left + barGap * i + (barGap - barWidth) / 2;
+      const barH = (Math.abs(val) / maxVal) * (chartH / 2);
+      const y = val >= 0 ? zeroY - barH : zeroY;
+
+      const isHovered = hoveredDayIndex === i;
+      const baseColor = val >= 0 ? dayPosColor : dayNegColor;
+      ctx.fillStyle = isHovered ? baseColor + 'CC' : baseColor;
+      ctx.beginPath();
+      ctx.roundRect(x, y, barWidth, barH, 4);
+      ctx.fill();
+
+      // Store full column rect for hover hit detection
+      rects.push({ x: padding.left + barGap * i, y: padding.top, w: barGap, h: chartH, barX: x, barY: y, barW: barWidth, barH, index: i });
+
+      // Day label
+      ctx.fillStyle = textTertiary;
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(dayNames[i], x + barWidth / 2, h - 10);
+    });
+
+    dayBarRects.current = rects;
+
+    // Draw tooltip for hovered day
+    if (hoveredDayIndex !== null && dayCounts[hoveredDayIndex] > 0) {
+      const i = hoveredDayIndex;
+      const wr = dayCounts[i] > 0 ? ((dayWins[i] / dayCounts[i]) * 100).toFixed(1) : '0.0';
+      const pf = dayLossPL[i] === 0 ? (dayWinPL[i] > 0 ? '∞' : '0.00') : (dayWinPL[i] / dayLossPL[i]).toFixed(2);
+      const avgW = dayWins[i] > 0 ? (dayWinPL[i] / dayWins[i]).toFixed(2) : '0.00';
+      const avgL = dayLosses[i] > 0 ? (dayLossPL[i] / dayLosses[i]).toFixed(2) : '0.00';
+      const r = rects[i];
+      drawTooltip(ctx, r.barX + r.barW / 2, r.barY, dayNames[i], [
+        { label: 'İşlem', value: `${dayCounts[i]}` },
+        { label: 'Kazanma Oranı', value: `${wr}%` },
+        { label: 'Kâr Faktörü', value: pf },
+        { label: 'Ort. Kazanç', value: `$${avgW}`, color: dayPosColor },
+        { label: 'Ort. Kayıp', value: `-$${avgL}`, color: dayNegColor },
+        { label: 'Toplam K/Z', value: `$${dayPL[i].toFixed(2)}`, color: dayPL[i] >= 0 ? dayPosColor : dayNegColor },
+      ], w, h);
+    }
+  }, [trades, hoveredDayIndex, dayPLMode, document.documentElement.dataset.theme]);
+
+  // Win rate by ticker
+  const tickerStats = {};
+  trades.forEach(t => {
+    if (!tickerStats[t.ticker]) tickerStats[t.ticker] = { wins: 0, losses: 0, totalPL: 0 };
+    const pl = getTradePL(t);
+    if (pl > 0) tickerStats[t.ticker].wins++;
+    else tickerStats[t.ticker].losses++;
+    tickerStats[t.ticker].totalPL += pl;
+  });
+
+  // Streaks
+  let bestWinStreak = 0, bestLossStreak = 0, tempStreak = 0, lastWin = null;
+  const sorted = [...trades].sort((a, b) => new Date(a.exitTime) - new Date(b.exitTime));
+  sorted.forEach(t => {
+    const isWin = getTradePL(t) > 0;
+    if (lastWin === null) { tempStreak = 1; }
+    else if (isWin === lastWin) { tempStreak++; }
+    else { tempStreak = 1; }
+    lastWin = isWin;
+    if (isWin && tempStreak > bestWinStreak) bestWinStreak = tempStreak;
+    if (!isWin && tempStreak > bestLossStreak) bestLossStreak = tempStreak;
+  });
+
+  const profitFactor = (() => {
+    let grossWins = 0, grossLosses = 0;
+    trades.forEach(t => {
+      const pl = getTradePL(t);
+      if (pl > 0) grossWins += pl;
+      else grossLosses += Math.abs(pl);
+    });
+    return grossLosses === 0 ? grossWins : (grossWins / grossLosses);
+  })();
+
+  const expectancy = stats.totalTrades > 0
+    ? (stats.winRate / 100) * stats.avgWin + (1 - stats.winRate / 100) * stats.avgLoss
+    : 0;
+
+  // Previous period profit factor & expectancy for % change
+  const prevProfitFactor = (() => {
+    if (!prevTrades || prevTrades.length === 0) return 0;
+    let grossWins = 0, grossLosses = 0;
+    prevTrades.forEach(t => {
+      const pl = getTradePL(t);
+      if (pl > 0) grossWins += pl;
+      else grossLosses += Math.abs(pl);
+    });
+    return grossLosses === 0 ? grossWins : (grossWins / grossLosses);
+  })();
+
+  const prevExpectancy = prevStats && prevStats.totalTrades > 0
+    ? (prevStats.winRate / 100) * prevStats.avgWin + (1 - prevStats.winRate / 100) * prevStats.avgLoss
+    : 0;
+
+  // Max drawdown
+  const maxDrawdown = (() => {
+    if (trades.length === 0) return 0;
+    const sorted = [...trades].sort((a, b) => new Date(a.exitTime) - new Date(b.exitTime));
+    let peak = 0, running = 0, dd = 0;
+    sorted.forEach(t => {
+      running += getTradePL(t);
+      if (running > peak) peak = running;
+      const drawdown = peak - running;
+      if (drawdown > dd) dd = drawdown;
+    });
+    return dd;
+  })();
+
+  // Sharpe & Sortino ratios
+  const sharpeRatio = calculateSharpeRatio(trades);
+  const sortinoRatio = calculateSortinoRatio(trades);
+
+  // Kelly Criterion (based on $2000 max drawdown as bankroll)
+  const kelly = calculateKellyCriterion(trades, kellyDrawdown);
+
+  // Monte Carlo simulation (memoized to avoid re-running on every render)
+  const monteCarloResults = useMemo(() => {
+    if (trades.length < 5) return null;
+    return runMonteCarloSimulation(trades);
+  }, [trades]);
+
+  // Performance by time of day — 30-min detail + hourly summary
+  const { timeOfDayStats } = (() => {
+    // Build 30-min buckets with trade data
+    const buckets = {};
+    trades.forEach(t => {
+      const estParts = toEST(t.enterTime);
+      const h = estParts.hours;
+      const m = estParts.minutes < 30 ? 0 : 30;
+      const key = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      if (!buckets[key]) buckets[key] = { totalPL: 0, wins: 0, losses: 0, count: 0, winPL: 0, lossPL: 0 };
+      const pl = getTradePL(t);
+      buckets[key].totalPL += pl;
+      buckets[key].count++;
+      if (pl > 0) { buckets[key].wins++; buckets[key].winPL += pl; }
+      else { buckets[key].losses++; buckets[key].lossPL += Math.abs(pl); }
+    });
+
+    // Generate all 30-min slots for the full day (00:00-23:30, local time)
+    const allSlots = [];
+    const sessionHours = [];
+    for (let h = 0; h <= 23; h++) sessionHours.push(h);
+    for (const h of sessionHours) {
+      for (const m of [0, 30]) {
+        const key = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        const data = buckets[key] || { totalPL: 0, wins: 0, losses: 0, count: 0, winPL: 0, lossPL: 0 };
+        allSlots.push({
+          time: key,
+          ...data,
+          winRate: data.count > 0 ? (data.wins / data.count * 100) : 0,
+          avgPL: data.count > 0 ? data.totalPL / data.count : 0,
+        });
+      }
+    }
+
+    return { timeOfDayStats: allSlots };
+  })();
+
+  // Time of day bar chart — always 30-min detail
+  useEffect(() => {
+    if (!timeCanvasRef.current || timeOfDayStats.length === 0) return;
+
+    const canvas = timeCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 320 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '320px';
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = 320;
+    const padding = { top: 20, right: 20, bottom: 90, left: 60 };
+
+    const timeValues = timeOfDayStats.map(s => timePLMode === 'avg' ? s.avgPL : s.totalPL);
+    const maxVal = Math.max(...timeValues.map(Math.abs), 1);
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    const bgSurface = getCSSVar('--bg-surface');
+    const textMuted = getCSSVar('--text-muted');
+    const textTertiary = getCSSVar('--text-tertiary');
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = bgSurface;
+    ctx.fillRect(0, 0, w, h);
+
+    // Zero line
+    const zeroY = padding.top + chartH / 2;
+    ctx.strokeStyle = textMuted;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, zeroY);
+    ctx.lineTo(w - padding.right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Y-axis labels
+    const gridLines = 4;
+    const borderColor = getCSSVar('--border');
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = padding.top + (chartH / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(w - padding.right, y);
+      ctx.stroke();
+
+      const val = maxVal - (2 * maxVal / gridLines) * i;
+      ctx.fillStyle = textTertiary;
+      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('$' + val.toFixed(0), padding.left - 8, y + 4);
+    }
+
+    const n = timeOfDayStats.length;
+    const barGap = chartW / n;
+    const barWidth = barGap * 0.6;
+    const rects = [];
+    const timePosColor = getCSSVar('--positive');
+    const timeNegColor = getCSSVar('--negative');
+
+    // Draw hover background first (behind bars)
+    if (hoveredTimeIndex !== null) {
+      ctx.fillStyle = colorToRgba(getCSSVar('--text-primary'), 0.04);
+      ctx.fillRect(padding.left + barGap * hoveredTimeIndex, padding.top, barGap, chartH);
+    }
+
+    timeOfDayStats.forEach((stat, i) => {
+      const val = timeValues[i];
+      const x = padding.left + barGap * i + (barGap - barWidth) / 2;
+      const barH = (Math.abs(val) / maxVal) * (chartH / 2);
+      const y = val >= 0 ? zeroY - barH : zeroY;
+
+      const isHovered = hoveredTimeIndex === i;
+      const timeBaseColor = val >= 0 ? timePosColor : timeNegColor;
+      ctx.fillStyle = stat.count === 0 ? 'transparent' : (isHovered ? timeBaseColor + 'CC' : timeBaseColor);
+      if (stat.count > 0) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, barH, 3);
+        ctx.fill();
+      }
+
+      // Store full column rect for hover hit detection
+      rects.push({ x: padding.left + barGap * i, y: padding.top, w: barGap, h: chartH, barX: x, barY: y, barW: barWidth, barH, index: i });
+
+      // Time label
+      ctx.fillStyle = textTertiary;
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.save();
+      ctx.translate(x + barWidth / 2, padding.top + chartH + 12);
+      ctx.rotate(-Math.PI / 4);
+      ctx.fillText(stat.time, 0, 0);
+      ctx.restore();
+      ctx.textBaseline = 'alphabetic';
+    });
+
+    timeBarRects.current = rects;
+
+    // Draw tooltip for hovered time bucket
+    if (hoveredTimeIndex !== null && hoveredTimeIndex < timeOfDayStats.length) {
+      const stat = timeOfDayStats[hoveredTimeIndex];
+      const pf = stat.lossPL === 0 ? (stat.winPL > 0 ? '∞' : '0.00') : (stat.winPL / stat.lossPL).toFixed(2);
+      const r = rects[hoveredTimeIndex];
+      drawTooltip(ctx, r.barX + r.barW / 2, r.barY, stat.time, [
+        { label: 'İşlem', value: `${stat.count}` },
+        { label: 'Kazanma Oranı', value: `${stat.winRate.toFixed(1)}%` },
+        { label: 'Kâr Faktörü', value: pf },
+        { label: 'Ort. K/Z', value: formatMoney(stat.avgPL), color: stat.avgPL >= 0 ? timePosColor : timeNegColor },
+        { label: 'Toplam K/Z', value: formatMoney(stat.totalPL), color: stat.totalPL >= 0 ? timePosColor : timeNegColor },
+      ], w, h);
+    }
+  }, [trades, hoveredTimeIndex, timePLMode, document.documentElement.dataset.theme]);
+
+  // Canvas hover listeners for bar charts — column-based hit detection (x-range only)
+  useEffect(() => {
+    const handleBarHover = (canvas, barRects, setIndex) => {
+      if (!canvas) return () => {};
+      const onMove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        let found = null;
+        for (const r of barRects.current) {
+          if (mx >= r.x && mx <= r.x + r.w) {
+            found = r.index;
+            break;
+          }
+        }
+        setIndex(found);
+      };
+      const onLeave = () => setIndex(null);
+      canvas.addEventListener('mousemove', onMove);
+      canvas.addEventListener('mouseleave', onLeave);
+      return () => {
+        canvas.removeEventListener('mousemove', onMove);
+        canvas.removeEventListener('mouseleave', onLeave);
+      };
+    };
+
+    const cleanupDay = handleBarHover(barCanvasRef.current, dayBarRects, setHoveredDayIndex);
+    const cleanupTime = handleBarHover(timeCanvasRef.current, timeBarRects, setHoveredTimeIndex);
+    return () => { cleanupDay(); cleanupTime(); };
+  }, [trades]);
+
+  // Monte Carlo paths chart
+  useEffect(() => {
+    if (!monteCarloCanvasRef.current || !monteCarloResults || !monteCarloResults.paths) return;
+
+    const canvas = monteCarloCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 300 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '300px';
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = 300;
+    const padding = { top: 20, right: 20, bottom: 30, left: 60 };
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    const bgSurface = getCSSVar('--bg-surface');
+    const textTertiary = getCSSVar('--text-tertiary');
+    const borderColor = getCSSVar('--border');
+    const posColor = getCSSVar('--positive');
+    const negColor = getCSSVar('--negative');
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = bgSurface;
+    ctx.fillRect(0, 0, w, h);
+
+    const { paths } = monteCarloResults;
+
+    // Find max day count and value range across all paths
+    let maxDay = 0;
+    let minVal = 0;
+    let maxVal = 0;
+    paths.forEach(p => {
+      if (p.points.length > maxDay) maxDay = p.points.length;
+      p.points.forEach(v => {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+      });
+    });
+    maxVal = maxVal > 0 ? maxVal * 1.05 : maxVal * 0.95;
+    minVal = minVal < 0 ? minVal * 1.05 : minVal * 0.95;
+    const range = maxVal - minVal || 1;
+
+    const toX = (day) => padding.left + (day / (maxDay - 1)) * chartW;
+    const toY = (val) => padding.top + ((maxVal - val) / range) * chartH;
+
+    // Grid lines
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    const gridLines = 5;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = padding.top + (chartH / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(w - padding.right, y);
+      ctx.stroke();
+
+      const val = maxVal - (range / gridLines) * i;
+      ctx.fillStyle = textTertiary;
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('$' + val.toFixed(0), padding.left - 8, y + 4);
+    }
+
+    // X-axis day labels
+    const dayStep = Math.max(1, Math.floor(maxDay / 8));
+    for (let d = 0; d < maxDay; d += dayStep) {
+      const x = toX(d);
+      ctx.fillStyle = textTertiary;
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`G${d}`, x, h - 8);
+    }
+
+    // Zero line
+    const zeroY = toY(0);
+    ctx.strokeStyle = textTertiary;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, zeroY);
+    ctx.lineTo(w - padding.right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw 100 sample paths
+    paths.forEach(p => {
+      ctx.beginPath();
+      p.points.forEach((val, i) => {
+        const x = toX(i);
+        const y = toY(val);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = p.passed ? colorToRgba(posColor, 0.25) : colorToRgba(negColor, 0.2);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+  }, [monteCarloResults, document.documentElement.dataset.theme]);
+
+  if (trades.length === 0 && period === 'all') {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Analizler</h1>
+          <p className="text-text-secondary text-sm mt-1">Analizleri görmek için işlem ekleyin</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-text-primary">Analizler</h1>
+        <p className="text-text-secondary text-sm mt-1">Ayrıntılı performans analizi</p>
+      </div>
+
+      {/* Period Filter + Eval filter */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <PeriodFilter value={period} onChange={setPeriod} trades={allTrades} />
+        </div>
+        <EvalFilterControl trades={allTrades} evalFilter={evalFilter} setEvalFilter={setEvalFilter} />
+      </div>
+
+      {trades.length === 0 ? (
+        <div className="bg-bg-surface border border-border rounded-xl p-8 text-center">
+          <p className="text-text-secondary text-sm">Bu dönemde işlem bulunamadı</p>
+        </div>
+      ) : (<>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Toplam K/Z" value={formatMoney(stats.totalPL)} color={stats.totalPL >= 0 ? 'text-positive' : 'text-negative'}
+          change={showChange ? calcPercentChange(stats.totalPL, prevStats.totalPL) : null} />
+        <WinRateCard wins={stats.wins} losses={stats.losses} breakevens={stats.breakevens} total={stats.totalTrades}
+          change={showChange ? calcPercentChange(stats.winRate, prevStats.winRate) : null} />
+        <StatCard label="Kâr Faktörü" value={profitFactor.toFixed(2)} color="text-text-primary"
+          change={showChange ? calcPercentChange(profitFactor, prevProfitFactor) : null} />
+        <StatCard label="Beklenti (Expectancy)" value={formatMoney(expectancy)} color={expectancy >= 0 ? 'text-positive' : 'text-negative'}
+          change={showChange ? calcPercentChange(expectancy, prevExpectancy) : null} />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <StatCard label="Maks. Düşüş (Drawdown)" value={formatMoney(maxDrawdown)} color="text-negative" />
+        <StatCard label="Başabaş Oranı" value={`${stats.breakevenPct.toFixed(1)}%`} subValue={`${stats.breakevens} işlem`} color="text-text-primary" />
+        <StatCard label="Sharpe Ratio" value={sharpeRatio === Infinity ? '∞' : sharpeRatio.toFixed(2)} color={sharpeRatio > 0 ? 'text-positive' : 'text-negative'}
+          tooltip={"Toplam volatilite birimi başına getiriyi ölçen riske göre ayarlanmış getiri.\n\nFormül: (Ortalama Günlük K/Z / Günlük K/Z Standart Sapması) x √252\n\n1,0 üzeri = iyi, 2,0 üzeri = mükemmel, 0 altı = ortalamada para kaybediyorsunuz."} />
+        <StatCard label="Sortino Ratio" value={sortinoRatio === Infinity ? '∞' : sortinoRatio.toFixed(2)} color={sortinoRatio > 0 ? 'text-positive' : 'text-negative'}
+          tooltip={"Sharpe gibi, ancak yalnızca aşağı yönlü volatiliteyi cezalandırır, yukarı yönlü dalgalanmaları yok sayar.\n\nFormül: (Ortalama Günlük K/Z / Aşağı Yönlü Sapma) x √252\n\nYüksek olması iyidir. Sortino'nun Sharpe'tan çok yüksek olması volatilitenizin çoğunlukla yukarı yönlü olduğunu gösterir."} />
+        <div className="bg-bg-surface border border-border rounded-xl p-5">
+          <div className="text-text-secondary text-xs font-medium uppercase tracking-wider mb-2">Kelly Optimal Risk</div>
+          <div className="font-mono text-2xl font-bold text-text-primary">${kelly.optimalRisk.toFixed(0)}</div>
+          <div className="text-text-tertiary text-xs mt-1">{kelly.kellyPct.toFixed(1)}% düşüşün (drawdown)</div>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-text-tertiary text-xs">Maks. DD $</span>
+            <input
+              type="number"
+              value={kellyDrawdown}
+              onChange={(e) => setKellyDrawdown(Math.max(0, Number(e.target.value)))}
+              className="w-20 bg-bg-input border border-border rounded px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Long vs Short Breakdown */}
+      {(() => {
+        const longTrades = trades.filter(t => t.quantity > 0);
+        const shortTrades = trades.filter(t => t.quantity < 0);
+        const longStats = calculateAnalytics(longTrades);
+        const shortStats = calculateAnalytics(shortTrades);
+        return (
+          <div className="bg-bg-surface border border-border rounded-xl p-6">
+            <h3 className="text-text-primary font-semibold mb-4">Alış (Long) ve Satış (Short) Dağılımı</h3>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase bg-positive/15 text-positive">ALIŞ</span>
+                  <span className="text-text-secondary text-sm">{longStats.totalTrades} işlem</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Kazanma Oranı</span>
+                    <span className="font-mono text-text-primary">{longStats.winRate.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Ort. K/Z</span>
+                    <span className={`font-mono font-semibold ${longStats.totalTrades > 0 ? (longStats.totalPL / longStats.totalTrades >= 0 ? 'text-positive' : 'text-negative') : 'text-text-primary'}`}>
+                      ${longStats.totalTrades > 0 ? (longStats.totalPL / longStats.totalTrades).toFixed(2) : '0.00'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Toplam K/Z</span>
+                    <span className={`font-mono font-semibold ${longStats.totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>
+                      ${longStats.totalPL.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase bg-negative/15 text-negative">SATIŞ</span>
+                  <span className="text-text-secondary text-sm">{shortStats.totalTrades} işlem</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Kazanma Oranı</span>
+                    <span className="font-mono text-text-primary">{shortStats.winRate.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Ort. K/Z</span>
+                    <span className={`font-mono font-semibold ${shortStats.totalTrades > 0 ? (shortStats.totalPL / shortStats.totalTrades >= 0 ? 'text-positive' : 'text-negative') : 'text-text-primary'}`}>
+                      ${shortStats.totalTrades > 0 ? (shortStats.totalPL / shortStats.totalTrades).toFixed(2) : '0.00'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary">Toplam K/Z</span>
+                    <span className={`font-mono font-semibold ${shortStats.totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>
+                      ${shortStats.totalPL.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Equity Curve */}
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-text-primary font-semibold mb-4">Özkaynak Eğrisi</h3>
+          <div>
+            <canvas ref={canvasRef}></canvas>
+          </div>
+        </div>
+
+        {/* Detailed Statistics */}
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-text-primary font-semibold mb-4">Ayrıntılı İstatistikler</h3>
+          <div className="space-y-3">
+            {[
+              ['Toplam İşlem', stats.totalTrades, 'text-text-primary'],
+              ['Kazanan İşlemler', stats.wins, 'text-positive'],
+              ['Kaybeden İşlemler', stats.losses, 'text-negative'],
+              ['Ort. Kazanç', formatMoney(stats.avgWin), 'text-positive'],
+              ['Ort. Kayıp', formatMoney(stats.avgLoss), 'text-negative'],
+              ['En İyi İşlem', formatMoney(stats.bestTrade), 'text-positive'],
+              ['En Kötü İşlem', formatMoney(stats.worstTrade), 'text-negative'],
+              ['En Uzun Kazanç Serisi', bestWinStreak, 'text-positive'],
+              ['En Uzun Kayıp Serisi', bestLossStreak, 'text-negative'],
+              ['Ort. Süre', formatDuration(stats.avgDuration), 'text-text-primary'],
+            ].map(([label, value, color]) => (
+              <div key={label} className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-text-secondary text-sm">{label}</span>
+                <span className={`font-mono text-sm ${color}`}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* P/L by Ticker + Performance by Day */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* P/L by Ticker */}
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-text-primary font-semibold mb-4">Sembole Göre K/Z</h3>
+          <div className="space-y-3 max-h-[280px] overflow-y-auto">
+            {Object.entries(tickerStats)
+              .sort((a, b) => Math.abs(b[1].totalPL) - Math.abs(a[1].totalPL))
+              .map(([ticker, data]) => {
+                const total = data.wins + data.losses;
+                const wr = total > 0 ? ((data.wins / total) * 100).toFixed(0) : 0;
+                return (
+                  <div key={ticker} className="flex items-center justify-between py-2 border-b border-border/50">
+                    <div>
+                      <span className="font-mono text-sm font-semibold text-text-primary">{ticker}</span>
+                      <span className="text-text-tertiary text-xs ml-2">{total} işlem | %{wr} KO</span>
+                    </div>
+                    <span className={`font-mono text-sm font-semibold ${data.totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>
+                      {data.totalPL >= 0 ? '+' : ''}${data.totalPL.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+
+        {/* Performance by Day */}
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-text-primary font-semibold">Güne Göre Performans</h3>
+            <div className="flex bg-bg-input rounded-lg p-0.5 text-xs">
+              <button onClick={() => setDayPLMode('total')} className={`px-2.5 py-1 rounded-md transition-colors ${dayPLMode === 'total' ? 'bg-accent text-accent-text' : 'text-text-secondary hover:text-text-primary'}`}>Toplam K/Z</button>
+              <button onClick={() => setDayPLMode('avg')} className={`px-2.5 py-1 rounded-md transition-colors ${dayPLMode === 'avg' ? 'bg-accent text-accent-text' : 'text-text-secondary hover:text-text-primary'}`}>Ort. K/Z</button>
+            </div>
+          </div>
+          <div>
+            <canvas ref={barCanvasRef}></canvas>
+          </div>
+        </div>
+      </div>
+
+      {/* Performance by Time of Day */}
+      {trades.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-text-primary font-semibold">Giriş Saatine Göre Performans (30 Dk)</h3>
+            <div className="flex bg-bg-input rounded-lg p-0.5 text-xs">
+              <button onClick={() => setTimePLMode('avg')} className={`px-2.5 py-1 rounded-md transition-colors ${timePLMode === 'avg' ? 'bg-accent text-accent-text' : 'text-text-secondary hover:text-text-primary'}`}>Ort. K/Z</button>
+              <button onClick={() => setTimePLMode('total')} className={`px-2.5 py-1 rounded-md transition-colors ${timePLMode === 'total' ? 'bg-accent text-accent-text' : 'text-text-secondary hover:text-text-primary'}`}>Toplam K/Z</button>
+            </div>
+          </div>
+          <div className={showTimeTable ? 'mb-4' : ''}>
+            <canvas ref={timeCanvasRef} className="w-full"></canvas>
+          </div>
+          {showTimeTable && (
+            <div className="max-h-[300px] overflow-y-auto mb-4">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-bg-surface">
+                  <tr className="border-b border-border">
+                    <th className="text-left px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Saat</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">İşlem</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Kazanç</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Kayıp</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Kazanma Oranı</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Toplam K/Z</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider">Ort. K/Z</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeOfDayStats.map(row => (
+                    <tr key={row.time} className="border-b border-border/50 hover:bg-bg-input/50 transition-colors">
+                      <td className="px-3 py-2 font-mono text-text-primary">{row.time}</td>
+                      <td className="text-right px-3 py-2 text-text-secondary">{row.count}</td>
+                      <td className="text-right px-3 py-2 text-positive">{row.wins}</td>
+                      <td className="text-right px-3 py-2 text-negative">{row.losses}</td>
+                      <td className="text-right px-3 py-2 text-text-secondary">{row.winRate.toFixed(1)}%</td>
+                      <td className={`text-right px-3 py-2 font-mono font-semibold ${row.totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>
+                        {row.totalPL >= 0 ? '+' : ''}${row.totalPL.toFixed(2)}
+                      </td>
+                      <td className={`text-right px-3 py-2 font-mono ${row.avgPL >= 0 ? 'text-positive' : 'text-negative'}`}>
+                        {row.avgPL >= 0 ? '+' : ''}${row.avgPL.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <button
+            onClick={() => setShowTimeTable(!showTimeTable)}
+            className="text-xs text-text-tertiary hover:text-text-primary transition-colors px-2 py-1 rounded border border-border hover:border-text-muted"
+          >
+            {showTimeTable ? 'Daha Az Göster' : 'Daha Fazla Göster'}
+          </button>
+        </div>
+      )}
+
+      {/* Monte Carlo Simulation */}
+      {monteCarloResults && (
+        <div className="bg-bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-text-primary font-semibold mb-2">Monte Carlo Değerlendirme Simülasyonu</h3>
+          <p className="text-text-tertiary text-xs mb-4">
+            {monteCarloResults.totalSimulations.toLocaleString('tr-TR')} simülasyon | $3,000 kâr hedefi | $2,000 gün sonu takipli düşüş (drawdown) | 100 örnek yol
+          </p>
+          <div className="mb-4">
+            <canvas ref={monteCarloCanvasRef} className="w-full"></canvas>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-bg-page rounded-lg p-4 text-center">
+              <div className="text-text-secondary text-xs font-medium uppercase tracking-wider mb-1">Geçme Oranı</div>
+              <div className={`font-mono text-2xl font-bold ${monteCarloResults.passRate >= 50 ? 'text-positive' : 'text-negative'}`}>
+                {monteCarloResults.passRate.toFixed(1)}%
+              </div>
+            </div>
+            <div className="bg-bg-page rounded-lg p-4 text-center">
+              <div className="text-text-secondary text-xs font-medium uppercase tracking-wider mb-1">Geçmek İçin Ort. Gün</div>
+              <div className="font-mono text-2xl font-bold text-text-primary">
+                {monteCarloResults.avgDaysToPass > 0 ? monteCarloResults.avgDaysToPass.toFixed(1) : '—'}
+              </div>
+            </div>
+            <div className="bg-bg-page rounded-lg p-4 text-center">
+              <div className="text-text-secondary text-xs font-medium uppercase tracking-wider mb-1">Geçmek İçin Medyan Gün</div>
+              <div className="font-mono text-2xl font-bold text-text-primary">
+                {monteCarloResults.medianDaysToPass > 0 ? monteCarloResults.medianDaysToPass : '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </>)}
+    </div>
+  );
+};
+
+
+module.exports = AnalyticsPage;

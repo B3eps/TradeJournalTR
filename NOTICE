@@ -1,0 +1,10 @@
+Trade Journal TR
+================
+Bu proje, Apache License 2.0 ile lisanslanmis "RR Metrics" projesinin
+(https://github.com/Snoe0/rrmetrics) kisisel bir turevidir.
+
+Degisiklikler: arayuzun Turkcelestirilmesi, forex alanlari (lot/pip), cTrader ve
+MetaTrader CSV ice aktarma, ekonomik haber takvimi paneli, Electron ile
+masaustu uygulamasi olarak paketleme.
+
+Orijinal lisans metni LICENSE dosyasinda korunmustur.
