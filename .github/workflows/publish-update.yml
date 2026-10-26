@@ -29,7 +29,8 @@ jobs:
         run: |
           if ($env:UPDATE_REPO -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Set the repository variable UPDATE_REPO to owner/repository.' }
           $url = "https://raw.githubusercontent.com/$($env:UPDATE_REPO)/main/version.json"
-          $config = @{ manifestUrl = $url } | ConvertTo-Json
+          $repoPath = $env:UPDATE_REPO
+          $config = @{ manifestUrl = $url; refUrl = "https://api.github.com/repos/$repoPath/commits/main" } | ConvertTo-Json
           [IO.File]::WriteAllText((Join-Path $PWD 'electron/update-channel.json'), $config + "`n", [Text.UTF8Encoding]::new($false))
 
       - name: Build update files

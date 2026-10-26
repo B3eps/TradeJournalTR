@@ -1,4 +1,5 @@
 {
   "manifestUrl": "https://raw.githubusercontent.com/B3eps/TradeJournalTR-Updates/main/version.json",
-  "bundledVersion": "2026.10.26-205144"
+  "refUrl": "https://api.github.com/repos/B3eps/TradeJournalTR-Updates/commits/main",
+  "bundledVersion": "2026.10.26-205445"
 }

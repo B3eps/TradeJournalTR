@@ -33,8 +33,36 @@ function cacheBusted(url) {
   return target.href;
 }
 
-async function stageRemoteUpdate({ manifestUrl, updateRoot, currentVersion = '' }) {
+async function resolveImmutableManifestUrl(manifestUrl, refUrl) {
+  if (!refUrl) return manifestUrl;
+  const ref = new URL(refUrl);
+  if (ref.protocol !== 'https:' || ref.hostname !== 'api.github.com') {
+    throw new Error('Güncelleme GitHub ref adresi geçersiz.');
+  }
+  const refParts = ref.pathname.split('/').filter(Boolean);
+  if (refParts.length !== 5 || refParts[0] !== 'repos' || refParts[3] !== 'commits') {
+    throw new Error('Güncelleme GitHub ref yolu geçersiz.');
+  }
+  const refInfo = JSON.parse((await fetchBytes(ref.href, 1024 * 1024)).toString('utf8'));
+  if (typeof refInfo.sha !== 'string' || !/^[a-f0-9]{40}$/i.test(refInfo.sha)) {
+    throw new Error('Güncelleme GitHub ref yanıtında commit SHA bulunamadı.');
+  }
   const feed = new URL(manifestUrl);
+  const feedParts = feed.pathname.split('/').filter(Boolean);
+  if (feed.protocol !== 'https:' || feed.hostname !== 'raw.githubusercontent.com' ||
+      feedParts.length < 4 || feedParts[0] !== refParts[1] || feedParts[1] !== refParts[2]) {
+    throw new Error('Güncelleme manifesti ile GitHub ref aynı depoyu göstermeli.');
+  }
+  feedParts[2] = refInfo.sha;
+  feed.pathname = `/${feedParts.join('/')}`;
+  feed.search = '';
+  feed.hash = '';
+  return feed.href;
+}
+
+async function stageRemoteUpdate({ manifestUrl, refUrl = '', updateRoot, currentVersion = '' }) {
+  const immutableManifestUrl = await resolveImmutableManifestUrl(manifestUrl, refUrl);
+  const feed = new URL(immutableManifestUrl);
   if (feed.protocol !== 'https:') throw new Error('Güncelleme adresi HTTPS olmalı.');
   const manifestBytes = await fetchBytes(cacheBusted(feed.href), 1024 * 1024);
   const manifest = JSON.parse(manifestBytes.toString('utf8'));

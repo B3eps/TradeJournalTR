@@ -91,6 +91,19 @@ function getUpdateManifestUrl() {
   return '';
 }
 
+function getUpdateRefUrl() {
+  const localConfig = path.join(app.getPath('userData'), 'update-channel.json');
+  const bundledConfig = path.join(app.getAppPath(), 'electron', 'update-channel.json');
+  for (const file of [localConfig, bundledConfig]) {
+    try {
+      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (typeof config.manifestUrl === 'string' && config.manifestUrl.trim() &&
+          typeof config.refUrl === 'string' && config.refUrl.trim()) return config.refUrl.trim();
+    } catch (e) { /* absent configuration */ }
+  }
+  return '';
+}
+
 function getBundledUpdateVersion() {
   try {
     const configPath = path.join(app.getAppPath(), 'electron', 'update-channel.json');
@@ -105,6 +118,7 @@ async function checkRemoteUpdates() {
   try {
     const result = await stageRemoteUpdate({
       manifestUrl,
+      refUrl: getUpdateRefUrl(),
       updateRoot: app.getPath('userData'),
       currentVersion: getBundledUpdateVersion(),
     });
