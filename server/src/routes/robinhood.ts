@@ -178,7 +178,7 @@ robinhood.get(
       });
     } catch (err: any) {
       console.error('Robinhood status error:', err.message);
-      return c.json({ error: 'Failed to get Robinhood status' }, 500);
+      return c.json({ error: 'Robinhood durumu alınamadı.' }, 500);
     }
   },
 );
@@ -229,7 +229,7 @@ robinhood.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'No new trades found', synced: 0 });
+        return c.json({ message: 'Yeni işlem bulunamadı.', synced: 0 });
       }
 
       // Resolve instrument URLs to ticker symbols (batch + cache)
@@ -288,7 +288,7 @@ robinhood.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'No completed round-trip trades found', synced: 0 });
+        return c.json({ message: 'Tamamlanmış gidiş-dönüş işlemi bulunamadı.', synced: 0 });
       }
 
       // Dedup: check which robinhood order IDs already exist
@@ -303,7 +303,7 @@ robinhood.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'No new trades found', synced: 0 });
+        return c.json({ message: 'Yeni işlem bulunamadı.', synced: 0 });
       }
 
       // Build trade objects for bulk insert

@@ -150,7 +150,7 @@ projectx.get(
       });
     } catch (err: any) {
       console.error('ProjectX status error:', err.message);
-      return c.json({ error: 'Failed to get ProjectX status' }, 500);
+      return c.json({ error: 'ProjectX durumu alınamadı.' }, 500);
     }
   },
 );
@@ -182,10 +182,10 @@ projectx.post(
     // Validate copytrade config if provided
     if (copytradeConfig) {
       if (!selectedAccounts.includes(copytradeConfig.leadAccountId)) {
-        return c.json({ error: 'Lead account must be one of the selected accounts' }, 400);
+        return c.json({ error: 'Lider hesap, seçili hesaplardan biri olmalıdır.' }, 400);
       }
       if (!copytradeConfig.multiplier || copytradeConfig.multiplier < 1) {
-        return c.json({ error: 'Multiplier must be at least 1' }, 400);
+        return c.json({ error: 'Çarpan en az 1 olmalıdır.' }, 400);
       }
     }
 
@@ -206,7 +206,7 @@ projectx.post(
       return c.json({ message: 'Account settings saved' });
     } catch (err: any) {
       console.error('ProjectX accounts save error:', err.message);
-      return c.json({ error: 'Failed to save account settings' }, 500);
+      return c.json({ error: 'Hesap ayarları kaydedilemedi.' }, 500);
     }
   },
 );
@@ -275,7 +275,7 @@ projectx.post(
 
       const selectedAccounts: number[] = pxConn.selected_accounts || [];
       if (selectedAccounts.length === 0) {
-        return c.json({ error: 'No accounts selected for sync' }, 400);
+        return c.json({ error: 'Eşitleme için hesap seçilmedi.' }, 400);
       }
 
       const copytradeConfig = pxConn.copytrade_config;
@@ -294,7 +294,7 @@ projectx.post(
         ) {
           if (!pxConn.username || !pxConn.api_key) {
             return c.json(
-              { error: 'ProjectX session expired. Please reconnect your account.', expired: true },
+              { error: 'ProjectX oturumunun süresi doldu. Hesabınızı yeniden bağlayın.', expired: true },
               401,
             );
           }
@@ -308,7 +308,7 @@ projectx.post(
         }
       } catch {
         return c.json(
-          { error: 'ProjectX session expired. Please reconnect your account.', expired: true },
+          { error: 'ProjectX oturumunun süresi doldu. Hesabınızı yeniden bağlayın.', expired: true },
           401,
         );
       }
@@ -354,7 +354,7 @@ projectx.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'No new trades found', synced: 0 });
+        return c.json({ message: 'Yeni işlem bulunamadı.', synced: 0 });
       }
 
       // Dedup: check which trade IDs already exist
@@ -369,7 +369,7 @@ projectx.post(
         await brokerDb.updateById(serviceClient, connectionId, {
           last_sync_time: new Date().toISOString(),
         });
-        return c.json({ message: 'No new trades found', synced: 0 });
+        return c.json({ message: 'Yeni işlem bulunamadı.', synced: 0 });
       }
 
       // Resolve contract IDs to ticker names
