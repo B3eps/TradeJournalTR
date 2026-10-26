@@ -13,6 +13,7 @@ const CardModal = ({ initialFront, noteId, onClose, onCreated }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const backRef = useRef(null);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => { if (backRef.current) backRef.current.focus(); }, 30);
@@ -23,18 +24,22 @@ const CardModal = ({ initialFront, noteId, onClose, onCreated }) => {
 
   const submit = async (e) => {
     if (e) e.preventDefault();
+    if (savingRef.current) return;
     const f = front.trim();
     if (!f) { setError('Ön yüz boş olamaz.'); return; }
     if (f.length > 5000 || back.length > 5000) { setError('Kart metni en fazla 5000 karakter olabilir.'); return; }
+    savingRef.current = true;
     setSaving(true);
     setError('');
     try {
       await api.createCard({ front: f, back: back.trim(), sourceType: 'note', sourceId: noteId });
-      onCreated();
     } catch (err) {
+      savingRef.current = false;
       setError(err && err.message ? err.message : 'Kart oluşturulamadı.');
       setSaving(false);
+      return;
     }
+    onCreated();
   };
 
   return (
