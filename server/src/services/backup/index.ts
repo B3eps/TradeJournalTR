@@ -135,7 +135,7 @@ function stamp(d: Date): string {
   return `${localYmd(d).replace(/-/g, '')}-${localHm(d).replace(':', '')}`;
 }
 
-/** Copy only ordinary files; never follow a symlink out of the data folder. */
+/** Copy flat regular files; reject detected symlinks and fail on concurrent changes. */
 function copyFlatFiles(source: string, destination: string): number {
   fs.mkdirSync(destination, { recursive: true });
   if (!fs.existsSync(source)) return 0;
@@ -153,10 +153,12 @@ function copyFlatFiles(source: string, destination: string): number {
     if (!entry.isFile()) throw new Error(`Unsupported backup entry: ${entry.name}`);
     const sourceFile = path.join(source, entry.name);
     const destFile = path.join(destination, entry.name);
-    const before = fs.statSync(sourceFile);
+    const before = fs.lstatSync(sourceFile);
+    if (before.isSymbolicLink() || !before.isFile()) throw new Error(`Unsupported backup entry: ${entry.name}`);
     fs.copyFileSync(sourceFile, destFile);
-    const after = fs.statSync(sourceFile);
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || fs.statSync(destFile).size !== after.size) {
+    const after = fs.lstatSync(sourceFile);
+    if (after.isSymbolicLink() || !after.isFile() || before.ino !== after.ino || before.dev !== after.dev ||
+        before.size !== after.size || before.mtimeMs !== after.mtimeMs || fs.statSync(destFile).size !== after.size) {
       throw new Error(`File changed during backup: ${entry.name}`);
     }
     copied++;
