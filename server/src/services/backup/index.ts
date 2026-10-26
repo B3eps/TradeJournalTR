@@ -1,10 +1,10 @@
 /**
  * Local backups: `<DATA_DIR>/../yedekler/yedek-YYYYMMDD-HHmm/` holding a
- * consistent SQLite copy (better-sqlite3 online backup API), screenshots,
- * news evaluations and
+ * consistent SQLite copy (better-sqlite3 online backup API), trade attachments,
+ * Electron screenshots, news evaluations and
  * manifest.json. The encryption key is intentionally NOT copied: a backup
  * folder may be shared or synced, so portable recovery requires a separately
- * protected copy of the complete data directory.
+ * protected copy of the complete data directory and Electron screenshot folder.
  * Restore is manual (documented in the UI).
  */
 import fs from 'node:fs';
@@ -18,8 +18,9 @@ import { IntegrationError, bad, optBool, intInRange, optTime, localHm, localYmd,
 
 export const BACKUP_KEY = 'backup';
 export const BACKUP_ROOT = path.resolve(process.env.BACKUP_DIR || path.join(path.resolve(DATA_DIR), '..', 'yedekler'));
+const CAPTURE_SCREENSHOTS_DIR = path.join(path.dirname(path.resolve(DATA_DIR)), 'ekran-goruntuleri');
 const NAME_RE = /^yedek-\d{8}-\d{4}(?:-\d{1,2})?$/;
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const COUNT_TABLES = ['trades', 'tasks', 'projects', 'notes', 'cards', 'daily_notes', 'news_items', 'habits', 'fin_transactions'];
 
 export interface BackupSettings { autoEnabled: boolean; hour: string; keep: number }
@@ -32,6 +33,7 @@ export interface BackupInfo {
   dbFile: string | null;
   counts: Record<string, number> | null;
   screenshotCount: number | null;
+  captureScreenshotCount: number | null;
   evaluationCount: number | null;
   keyMatches: boolean | null;
   auto: boolean;
@@ -99,6 +101,7 @@ export function listBackups(): BackupInfo[] {
         dbFile: manifest && typeof manifest.dbFile === 'string' ? manifest.dbFile : null,
         counts: manifest && manifest.counts && typeof manifest.counts === 'object' ? manifest.counts : null,
         screenshotCount: Number.isInteger(manifest?.screenshotCount) ? manifest.screenshotCount : null,
+        captureScreenshotCount: Number.isInteger(manifest?.captureScreenshotCount) ? manifest.captureScreenshotCount : null,
         evaluationCount: Number.isInteger(manifest?.evaluationCount) ? manifest.evaluationCount : null,
         keyMatches: typeof manifest?.keyFingerprint === 'string' ? manifest.keyFingerprint === currentKeyFingerprint : null,
         auto: !!manifest?.auto,
@@ -177,6 +180,7 @@ async function doBackup(opts: { keep: number; auto: boolean }): Promise<BackupIn
     // Online backup: consistent snapshot even while the app keeps writing (WAL).
     await getDb().backup(path.join(tmpDir, dbFile));
     const screenshotCount = copyFlatFiles(SCREENSHOTS_DIR, path.join(tmpDir, 'screenshots'));
+    const captureScreenshotCount = copyFlatFiles(CAPTURE_SCREENSHOTS_DIR, path.join(tmpDir, 'ekran-goruntuleri'));
     const evaluationCount = copyFlatFiles(path.join(DATA_DIR, 'news-eval'), path.join(tmpDir, 'news-eval'));
     // Detect a mismatched key at restore time without putting the key in a shareable backup.
     const keyFingerprint = crypto.createHash('sha256').update(getEnv().ENCRYPTION_KEY).digest('hex');
@@ -203,10 +207,11 @@ async function doBackup(opts: { keep: number; auto: boolean }): Promise<BackupIn
       dbSizeBytes: fs.statSync(path.join(tmpDir, dbFile)).size,
       counts,
       screenshotCount,
+      captureScreenshotCount,
       evaluationCount,
       keyFingerprint,
       excluded: ['secret.key'],
-      note: 'Bu yerel yedek veritabanını, ekran görüntülerini ve haber değerlendirmelerini içerir. Şifreleme anahtarı dahil değildir. Başka bilgisayara taşımak için uygulama kapalıyken data klasörünü anahtarıyla birlikte ayrıca güvenli şekilde kopyalayın.',
+      note: 'Bu yerel yedek veritabanını, işlem görsellerini, Electron ekran görüntülerini ve haber değerlendirmelerini içerir. Şifreleme anahtarı dahil değildir. Başka bilgisayara taşımak için uygulama kapalıyken data klasörünü anahtarıyla ve ekran-goruntuleri klasörünü ayrıca güvenli şekilde kopyalayın.',
     };
     fs.writeFileSync(path.join(tmpDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
     fs.renameSync(tmpDir, finalDir);
@@ -270,4 +275,9 @@ export function startAutoBackup(): void {
   autoTimer.unref();
 }
 
-export const BACKUP_PATHS = { root: BACKUP_ROOT, dataDir: path.resolve(DATA_DIR), dbFile: path.basename(DB_PATH) };
+export const BACKUP_PATHS = {
+  root: BACKUP_ROOT,
+  dataDir: path.resolve(DATA_DIR),
+  dbFile: path.basename(DB_PATH),
+  captureDir: CAPTURE_SCREENSHOTS_DIR,
+};
