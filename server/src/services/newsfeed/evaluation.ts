@@ -140,6 +140,8 @@ export const ORDER_LANGUAGE_PATTERNS: RegExp[] = [
   /\byou\s+should\s+(buy|sell|trade|short|long|not\s+trade)\b/i,
   /(almalısın|satmalısın|alınmalı|satılmalı|işlem\s+aç(ın|malısın)?|işlem\s+açma(yın|malısın)?)(?![a-zçğıöşü])/i,
   /\b(buy|sell)\s+(now|at|above|below)\b/i,
+  // Conditional price-level trade advice (e.g. "EURUSD 1.08 altında satış düşünülebilir").
+  /\b\d{1,6}(?:[.,]\d+)\s*(?:altında|altinda|üzerinde|uzerinde|altına|altina|üstünde|ustunde|below|under|above|over)\s*(?:al|sat)\p{L}*/iu,
 ];
 
 const ETKI_VALUES = ['yukarı baskı', 'aşağı baskı', 'belirsiz', 'karışık'] as const satisfies readonly Etki[];

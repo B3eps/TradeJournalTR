@@ -253,9 +253,9 @@ export function scanEvaluations(force = false): Map<string, Evaluation> {
   return out;
 }
 
-/** An evaluation file that exists but is invalid still counts as "has a file". */
+/** Only a successfully parsed evaluation should remove an item from the work queue. */
 function hasEvaluationFile(id: string): boolean {
-  return evalCache.has(id);
+  return !!evalCache.get(id)?.ev;
 }
 
 // --- queue (DATA_DIR/news-queue/pending.json) ---
