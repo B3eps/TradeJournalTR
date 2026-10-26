@@ -10,7 +10,7 @@ import path from 'node:path';
 import { getDb } from '../../db/connection';
 import * as newsDb from '../../db/news-items';
 import { getSetting, setSetting, listSettingsByKey } from '../../db/settings';
-import { EVALUATION_SAFETY_RULE_TR, buildAskPrompt, evaluationInputSchema, sanitizeEvaluation, type Evaluation } from '../newsfeed/evaluation';
+import { EVALUATION_SAFETY_RULE_TR, buildAskPrompt, sanitizeEvaluation, type Evaluation } from '../newsfeed/evaluation';
 import { NEWS_EVAL_DIR } from '../newsfeed';
 import { IntegrationError, bad, fetchWithTimeout, normalizeBaseUrl, optBool, intInRange } from '../ntfy/http';
 
@@ -171,17 +171,15 @@ export function finalizeLocalEvaluation(raw: unknown, id: string, now = new Date
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const candidate = raw as Record<string, unknown>;
   if (candidate.id !== undefined && candidate.id !== id) return null;
-  const parsed = evaluationInputSchema.safeParse({
+  const ev = sanitizeEvaluation({
     ...candidate,
     id,
     evaluatedAt: now.toISOString(),
     guven: 'düşük',
-  });
-  if (!parsed.success) return null;
-  const ev = sanitizeEvaluation(parsed.data, id, now);
+  }, id, now);
   if (!ev) return null;
   ev.uyari = ev.uyari ? `${LOCAL_AI_WARNING} ${ev.uyari}`.slice(0, 300) : LOCAL_AI_WARNING;
-  if (!ev.ozet && !ev.etkilenen.length && !ev.senaryolar.length) return null;
+  if (!ev.ozet || (!ev.etkilenen.length && !ev.senaryolar.length && !ev.izlenecekler.length)) return null;
   return ev;
 }
 
@@ -286,29 +284,56 @@ export function sampleNewsItem(): { id: string; title: string; source: string; i
 
 const AUTO_TICK_MS = 60 * 1000;
 const AUTO_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const attempted = new Set<string>();
+// Retry malformed/transient local-model output twice without retrying every minute forever.
+const AUTO_MAX_ATTEMPTS = 3;
+const AUTO_RETRY_DELAYS_MS = [5 * 60 * 1000, 20 * 60 * 1000];
+const attempts = new Map<string, { count: number; retryAt: number }>();
 let autoTimer: NodeJS.Timeout | null = null;
 let autoRunning = false;
+
+function rememberAutoAttempt(id: string, state: { count: number; retryAt: number }): void {
+  attempts.delete(id);
+  attempts.set(id, state);
+  if (attempts.size > 2000) attempts.delete(attempts.keys().next().value as string);
+}
 
 /** Summarises at most one new importance>=2 item per tick, for the first user with autoSummarize on. */
 export async function autoSummarizeTick(): Promise<string | null> {
   if (autoRunning || aiBusy()) return null;
   autoRunning = true;
+  let activeId: string | null = null;
   try {
     const conf = listSettingsByKey<Partial<AiSettings>>(AI_KEY)
       .map((r) => ({ ...AI_DEFAULTS, ...(r.value || {}) }))
       .find((s) => s.enabled && s.autoSummarize);
     if (!conf) return null;
     const cutoff = Date.now() - AUTO_MAX_AGE_MS;
+    const now = Date.now();
     const next = newsDb.listQueueCandidates(getDb(), 2, 30)
-      .find((r) => !attempted.has(r.id) && Date.parse(r.first_seen_at) >= cutoff && !hasEvaluation(r.id));
+      .find((r) => {
+        const previous = attempts.get(r.id);
+        return Date.parse(r.first_seen_at) >= cutoff && !hasEvaluation(r.id) &&
+          (!previous || (previous.count < AUTO_MAX_ATTEMPTS && previous.retryAt <= now));
+      });
     if (!next) return null;
     if (usedThisHour() >= conf.maxPerHour) return null;
-    attempted.add(next.id);
-    if (attempted.size > 2000) attempted.clear();
+    activeId = next.id;
+    const count = (attempts.get(next.id)?.count || 0) + 1;
+    rememberAutoAttempt(next.id, { count, retryAt: Number.POSITIVE_INFINITY });
     await summarizeNews(conf, next.id);
+    attempts.delete(next.id);
     return next.id;
   } catch (err: any) {
+    if (activeId) {
+      const state = attempts.get(activeId);
+      if (state) {
+        const delay = AUTO_RETRY_DELAYS_MS[state.count - 1];
+        rememberAutoAttempt(activeId, {
+          count: state.count,
+          retryAt: state.count < AUTO_MAX_ATTEMPTS && delay ? Date.now() + delay : Number.POSITIVE_INFINITY,
+        });
+      }
+    }
     console.warn('[Ollama] auto summary failed:', err?.message || err);
     return null;
   } finally {
