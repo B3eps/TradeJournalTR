@@ -129,6 +129,27 @@ function ensureTables(db: Db): void {
     });
     tx();
   }
+
+  // Add ChatGPT/Codex defaults to installations that still have the untouched
+  // pre-migration Development rules. Never rewrite a user's customized rules.
+  const migrationKey = 'chatgpt_categorization_v1';
+  const migrated = db.prepare('SELECT value FROM timetrack_meta WHERE key = ?').get(migrationKey);
+  if (!migrated) {
+    const development = DEFAULT_CATEGORIES.find((category) => category.name === 'Geliştirme');
+    const oldDefaultRules = development?.rules.filter((rule) =>
+      !['chatgpt', 'codex', 'chatgpt\\.com'].includes(rule.pattern),
+    ) || [];
+    const row = db.prepare('SELECT id, rules FROM timetrack_categories WHERE name = ?').get('Geliştirme') as { id: number; rules: string } | undefined;
+    const tx = db.transaction(() => {
+      if (development && row && JSON.stringify(parseRules(row.rules)) === JSON.stringify(oldDefaultRules)) {
+        db.prepare('UPDATE timetrack_categories SET rules = ? WHERE id = ?')
+          .run(JSON.stringify(development.rules), row.id);
+      }
+      db.prepare('INSERT OR REPLACE INTO timetrack_meta (key, value) VALUES (?, ?)')
+        .run(migrationKey, new Date().toISOString());
+    });
+    tx();
+  }
   initialized = true;
 }
 
