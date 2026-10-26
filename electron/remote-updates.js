@@ -33,7 +33,7 @@ function cacheBusted(url) {
   return target.href;
 }
 
-async function stageRemoteUpdate({ manifestUrl, updateRoot }) {
+async function stageRemoteUpdate({ manifestUrl, updateRoot, currentVersion = '' }) {
   const feed = new URL(manifestUrl);
   if (feed.protocol !== 'https:') throw new Error('Güncelleme adresi HTTPS olmalı.');
   const manifestBytes = await fetchBytes(cacheBusted(feed.href), 1024 * 1024);
@@ -44,10 +44,13 @@ async function stageRemoteUpdate({ manifestUrl, updateRoot }) {
     throw new Error('Güncelleme manifest biçimi geçersiz.');
   }
   const currentManifest = path.join(updateRoot, 'app', 'version.json');
+  let hasInstalledUpdateManifest = false;
   try {
     const current = JSON.parse(fs.readFileSync(currentManifest, 'utf8'));
+    hasInstalledUpdateManifest = current.format === 2 && typeof current.version === 'string';
     if (current.version === manifest.version && current.format === 2) return { updated: false, version: manifest.version };
   } catch { /* first update */ }
+  if (!hasInstalledUpdateManifest && currentVersion === manifest.version) return { updated: false, version: manifest.version };
 
   const files = Object.entries(manifest.files);
   if (files.length < 5 || files.length > MAX_FILES) throw new Error('Güncelleme dosya listesi geçersiz.');

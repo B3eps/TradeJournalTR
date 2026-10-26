@@ -91,6 +91,14 @@ function getUpdateManifestUrl() {
   return '';
 }
 
+function getBundledUpdateVersion() {
+  try {
+    const configPath = path.join(app.getAppPath(), 'electron', 'update-channel.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return typeof config.bundledVersion === 'string' ? config.bundledVersion : '';
+  } catch (e) { return ''; }
+}
+
 async function checkRemoteUpdates() {
   const manifestUrl = getUpdateManifestUrl();
   if (!manifestUrl) return;
@@ -98,6 +106,7 @@ async function checkRemoteUpdates() {
     const result = await stageRemoteUpdate({
       manifestUrl,
       updateRoot: app.getPath('userData'),
+      currentVersion: getBundledUpdateVersion(),
     });
     if (!result.updated) return;
     logRun(`uzak guncelleme hazir surum=${result.version}`);

@@ -41,5 +41,17 @@ $manifest = [ordered]@{ version = $version; format = 2; files = $hashes }
 $manifestPath = Join-Path $stage 'version.json'
 $json = $manifest | ConvertTo-Json -Depth 6
 [IO.File]::WriteAllText($manifestPath, $json + "`n", [Text.UTF8Encoding]::new($false))
+$channelPath = Join-Path $source 'electron\update-channel.json'
+$channel = [ordered]@{}
+if (Test-Path -LiteralPath $channelPath) {
+  try {
+    $existingChannel = Get-Content -LiteralPath $channelPath -Raw | ConvertFrom-Json
+    foreach ($property in $existingChannel.PSObject.Properties) { $channel[$property.Name] = $property.Value }
+  }
+  catch { throw "Update channel JSON geçersiz: $channelPath" }
+}
+$channel['bundledVersion'] = $version
+$channelJson = $channel | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText($channelPath, $channelJson + "`n", [Text.UTF8Encoding]::new($false))
 Write-Host "Update feed hazir: $stage"
 Write-Host "Manifest: $manifestPath"
