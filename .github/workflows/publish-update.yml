@@ -25,7 +25,7 @@ jobs:
       - name: Configure public binary-only update feed
         shell: pwsh
         env:
-          UPDATE_REPO: ${{ vars.UPDATE_REPO }}
+          UPDATE_REPO: B3eps/TradeJournalTR-Updates
         run: |
           if ($env:UPDATE_REPO -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Set the repository variable UPDATE_REPO to owner/repository.' }
           $url = "https://raw.githubusercontent.com/$($env:UPDATE_REPO)/main/version.json"
