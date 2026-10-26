@@ -7,7 +7,7 @@
  * protected copy of the complete data directory and Electron screenshot folder.
  * Restore is manual (documented in the UI).
  */
-import fs from 'node:fs';
+import fs, { type Dirent } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
@@ -143,8 +143,13 @@ function copyFlatFiles(source: string, destination: string): number {
   if (sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) {
     throw new Error(`Unsupported backup source: ${source}`);
   }
+  const sourceEntries = fs.readdirSync(source, { withFileTypes: true });
+  const entrySignature = (entries: Dirent[]) => JSON.stringify(entries
+    .map((entry) => `${entry.name}:${entry.isFile() ? 'f' : entry.isDirectory() ? 'd' : 'x'}`)
+    .sort());
+  const beforeSignature = entrySignature(sourceEntries);
   let copied = 0;
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+  for (const entry of sourceEntries) {
     if (!entry.isFile()) throw new Error(`Unsupported backup entry: ${entry.name}`);
     const sourceFile = path.join(source, entry.name);
     const destFile = path.join(destination, entry.name);
@@ -155,6 +160,12 @@ function copyFlatFiles(source: string, destination: string): number {
       throw new Error(`File changed during backup: ${entry.name}`);
     }
     copied++;
+  }
+  const afterStat = fs.lstatSync(source);
+  const afterEntries = fs.readdirSync(source, { withFileTypes: true });
+  if (afterStat.isSymbolicLink() || !afterStat.isDirectory() || afterStat.mtimeMs !== sourceStat.mtimeMs ||
+      entrySignature(afterEntries) !== beforeSignature) {
+    throw new Error(`Directory changed during backup: ${source}`);
   }
   return copied;
 }
