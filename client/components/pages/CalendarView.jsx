@@ -10,7 +10,7 @@ const { formatDuration, formatFullDateEST, formatTimeEST } = require("../../util
 const { calcPercentChange } = require("../../utils/periodUtils");
 const { SidePanelContext } = require("../../utils/contexts");
 const { useWindowWidth, useEscapeClose } = require("../../utils/hooks");
-const { formatMoney } = require("../../utils/format");
+const { formatMoney, formatPrice } = require("../../utils/format");
 
 const DayDetailPanel = ({ dateKey, dayData, onClose, dailyNotes, onSaveNote, onDeleteNote, tags, strategyRules, onEditTrade, sidebarCollapsed }) => {
   useEscapeClose(true, onClose);
@@ -230,11 +230,11 @@ const DayDetailPanel = ({ dateKey, dayData, onClose, dailyNotes, onSaveNote, onD
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                           <div className="flex justify-between">
                             <span className="text-text-secondary">Giriş Fiyatı</span>
-                            <span className="font-mono text-text-primary">${trade.enterPrice.toFixed(2)}</span>
+                            <span className="font-mono text-text-primary">{formatPrice(trade.enterPrice, trade.ticker)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-text-secondary">Çıkış Fiyatı</span>
-                            <span className="font-mono text-text-primary">${trade.exitPrice.toFixed(2)}</span>
+                            <span className="font-mono text-text-primary">{formatPrice(trade.exitPrice, trade.ticker)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-text-secondary">Miktar</span>

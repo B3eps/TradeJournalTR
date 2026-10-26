@@ -4,7 +4,7 @@ const helper = require('../../helper.js');
 const { authFetch } = helper;
 const { getTradePL } = require('../../utils/analytics');
 const { formatDuration, formatTimeEST } = require('../../utils/dateUtils');
-const { formatMoney, formatDateShort } = require('../../utils/format');
+const { formatMoney, formatPrice, formatDateShort } = require('../../utils/format');
 const { TAG_COLOR_PRESETS } = require('../../utils/tagConstants');
 const Icons = require('../shared/Icons');
 const sound = require('../../utils/sound');
@@ -724,8 +724,8 @@ const TradeListPage = ({ trades, triggerReload, onEdit, onOpenForm, onOpenImport
                             </div>
                           </td>
                         )}
-                        {isCol('entry') && <td className="px-4 py-3 font-mono text-sm text-text-secondary">${trade.enterPrice.toFixed(2)}</td>}
-                        {isCol('exit') && <td className="px-4 py-3 font-mono text-sm text-text-secondary">${trade.exitPrice.toFixed(2)}</td>}
+                        {isCol('entry') && <td className="px-4 py-3 font-mono text-sm text-text-secondary">{formatPrice(trade.enterPrice, trade.ticker)}</td>}
+                        {isCol('exit') && <td className="px-4 py-3 font-mono text-sm text-text-secondary">{formatPrice(trade.exitPrice, trade.ticker)}</td>}
                         {isCol('qty') && <td className="px-4 py-3 font-mono text-sm text-text-secondary">{trade.quantity}</td>}
                         <td className="px-4 py-3">
                           <span className={`font-mono text-sm font-semibold whitespace-nowrap ${pl >= 0 ? 'text-positive' : 'text-negative'}`}>
