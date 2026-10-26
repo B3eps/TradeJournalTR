@@ -111,7 +111,7 @@ const BackupSection = () => {
 
           <Banner tone="info">
             Yeni yedekler veritabanını, işlem görsellerini, Electron ekran görüntülerini ve haber değerlendirmelerini içerir. Şifreleme anahtarı (secret.key) <b>dahil edilmez</b>:
-            yedek klasörü paylaşılırsa anahtar açığa çıkmamalıdır. Bu yedek aynı anahtarla geri yüklenir.
+            yedek klasörü paylaşılırsa anahtar açığa çıkmamalıdır. Geri yüklemede kaynak kurulumdaki aynı secret.key dosyası gerekir; anahtar parmak izi yalnızca eşleşmeyi kontrol eder, anahtarı kurtaramaz.
             Başka bilgisayara taşınırken uygulama kapalıyken data klasörünün tamamını, anahtarı koruyarak ayrıca kopyalayın.
           </Banner>
 
