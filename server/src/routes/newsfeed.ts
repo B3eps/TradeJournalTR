@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, AuthContext } from '../bindings';
 import { requiresLogin } from '../middleware/auth';
 import { NEWS_CATEGORIES, type NewsCategory } from '../services/newsfeed/sources';
-import { buildFeedResponse, forceRefresh, getItemWithEvaluation, type FeedQuery } from '../services/newsfeed';
+import { buildFeedResponse, forceRefresh, getItemWithEvaluation, saveEvaluation, type FeedQuery } from '../services/newsfeed';
 import { buildAskPrompt } from '../services/newsfeed/evaluation';
 
 type HonoEnv = {
@@ -58,6 +58,27 @@ newsfeed.get('/api/newsfeed/ask/:id', requiresLogin, (c) => {
   const item = getItemWithEvaluation(id);
   if (!item) return c.json({ error: 'not_found' }, 404);
   return c.json({ prompt: buildAskPrompt(item) });
+});
+
+// POST /api/newsfeed/evaluation/:id accepts only the matching JSON response.
+newsfeed.post('/api/newsfeed/evaluation/:id', requiresLogin, async (c) => {
+  const id = c.req.param('id');
+  if (!/^[0-9a-f]{16}$/.test(id)) return c.json({ error: 'invalid_id' }, 400);
+  const text = await c.req.text();
+  if (text.length > 256 * 1024) return c.json({ error: 'payload_too_large' }, 413);
+  let raw: unknown;
+  try {
+    const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    raw = JSON.parse(cleaned);
+  } catch {
+    return c.json({ error: 'invalid_json' }, 400);
+  }
+  const item = getItemWithEvaluation(id);
+  if (!item) return c.json({ error: 'not_found' }, 404);
+  if (item.evaluation) return c.json({ error: 'already_evaluated' }, 409);
+  const evaluation = saveEvaluation(id, raw);
+  if (!evaluation) return c.json({ error: 'invalid_evaluation' }, 400);
+  return c.json({ evaluation });
 });
 
 export default newsfeed;

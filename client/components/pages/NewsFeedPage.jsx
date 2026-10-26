@@ -194,8 +194,11 @@ const EvaluationBlock = ({ ev }) => {
 };
 
 // ---------- Item card ----------
-const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk }) => {
+const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk, onImportEvaluation }) => {
   const [expanded, setExpanded] = useState(false);
+  const [evaluationText, setEvaluationText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
   const imp = IMPORTANCE_STYLE[item.importance] || IMPORTANCE_STYLE[0];
   const ts = new Date(item.publishedAt).getTime();
   const tsValid = !isNaN(ts);
@@ -275,19 +278,49 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk }) => {
       {item.evaluation && <EvaluationBlock ev={item.evaluation} />}
 
       {!item.evaluation && item.importance >= 2 && (
-        <div className="mt-3 flex items-center justify-between flex-wrap gap-2 bg-bg-input border border-border rounded-lg px-3 py-2">
-          <span className="text-text-secondary text-xs">
-            {copiedId === item.id ? 'Panoya kopyalandı. ChatGPT\'ye yapıştırın.' : 'Yapay zeka değerlendirmesi bekleniyor…'}
-          </span>
-          <button
-            type="button"
-            onClick={() => onAsk(item)}
-            disabled={askingId === item.id}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg bg-bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors disabled:opacity-60"
-          >
-            <Icons.Copy className="w-3.5 h-3.5" />
-            {askingId === item.id ? 'Hazırlanıyor…' : 'ChatGPT istemini kopyala'}
-          </button>
+        <div className="mt-3 bg-bg-input border border-border rounded-lg px-3 py-2 space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-text-secondary text-xs">
+              {copiedId === item.id ? 'İstem panoya kopyalandı. ChatGPT yanıtını aşağıya yapıştırın.' : 'Yapay zeka değerlendirmesi bekleniyor…'}
+            </span>
+            <button
+              type="button"
+              onClick={() => onAsk(item)}
+              disabled={askingId === item.id}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg bg-bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors disabled:opacity-60"
+            >
+              <Icons.Copy className="w-3.5 h-3.5" />
+              {askingId === item.id ? 'Hazırlanıyor…' : 'ChatGPT istemini kopyala'}
+            </button>
+          </div>
+          <label className="block text-xs text-text-tertiary" htmlFor={`news-eval-${item.id}`}>ChatGPT JSON yanıtı</label>
+          <textarea
+            id={`news-eval-${item.id}`}
+            value={evaluationText}
+            onChange={(event) => setEvaluationText(event.target.value)}
+            rows={4}
+            maxLength={256 * 1024}
+            placeholder="ChatGPT'nin JSON yanıtını buraya yapıştırın…"
+            className="w-full rounded-lg bg-bg-surface border border-border p-2 text-xs text-text-primary font-mono"
+          />
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {importError ? <span role="alert" className="text-warning text-xs">{importError}</span> : <span />}
+            <button
+              type="button"
+              disabled={importing || !evaluationText.trim()}
+              onClick={async () => {
+                setImporting(true);
+                setImportError('');
+                const error = await onImportEvaluation(item, evaluationText);
+                if (error) setImportError(error);
+                else setEvaluationText('');
+                setImporting(false);
+              }}
+              className="px-3 py-1 text-xs rounded-lg bg-accent text-white disabled:opacity-50"
+            >
+              {importing ? 'İçe aktarılıyor…' : 'Değerlendirmeyi kaydet'}
+            </button>
+          </div>
         </div>
       )}
     </article>
@@ -398,6 +431,32 @@ const NewsFeedPage = () => {
       if (mountedRef.current) setAskError('İstem hazırlanamadı. Sunucu yanıt vermiyor.');
     }
     if (mountedRef.current) setAskingId(null);
+  };
+
+  const handleImportEvaluation = async (item, responseText) => {
+    try {
+      const response = await authFetch(`/api/newsfeed/evaluation/${encodeURIComponent(item.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: responseText,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const messages = {
+          invalid_json: 'Yanıt JSON olarak okunamadı. Kod bloğu olmadan yalnızca JSON yapıştırın.',
+          invalid_evaluation: 'Değerlendirme şeması veya haber kimliği eşleşmiyor. ChatGPT yanıtını kontrol edin.',
+          not_found: 'Haber artık bulunamıyor. Haber akışını yenileyin.',
+          payload_too_large: 'Yanıt çok büyük; lütfen yalnızca değerlendirme JSON’unu yapıştırın.',
+          already_evaluated: 'Bu haber zaten değerlendirildi. Akışı yenileyin.',
+        };
+        return messages[data.error] || `Kayıt başarısız (HTTP ${response.status}).`;
+      }
+      await load();
+      return '';
+    } catch (err) {
+      console.error('Failed to import news evaluation:', err);
+      return 'Kayıt yapılamadı. Sunucu yanıt vermiyor.';
+    }
   };
 
   // ---- notifications toggle ----
@@ -609,6 +668,7 @@ const NewsFeedPage = () => {
               copiedId={copiedId}
               askingId={askingId}
               onAsk={handleAsk}
+              onImportEvaluation={handleImportEvaluation}
             />
           ))}
         </div>
