@@ -11,7 +11,8 @@ const H = require('./chartHelpers');
 // Usage: <TradeMiniChart trade={trade} height={180} onOpen={() => ...} />
 // =====================================================
 
-const cache = new Map(); // key -> response (session-level, avoids refetch while scrolling a list)
+const cache = new Map(); // bounded session LRU: avoids repeat fetches without retaining every chart forever
+const MAX_CACHE_ENTRIES = 24;
 
 const TradeMiniChart = ({ trade, height = 180, timeframe, className = '', onOpen }) => {
   const geom = useMemo(() => (trade ? H.tradeGeometry(trade) : null), [trade]);
@@ -23,14 +24,23 @@ const TradeMiniChart = ({ trade, height = 180, timeframe, className = '', onOpen
     if (!geom || !win) { setState({ loading: false, candles: [], error: 'İşlemde giriş zamanı/fiyatı yok.', symbol: '' }); return undefined; }
     const key = `${trade.ticker}|${tf}|${win.view.from}|${win.view.to}`;
     const hit = cache.get(key);
-    if (hit) { setState({ loading: false, candles: hit.candles, error: hit.error || null, symbol: hit.symbol }); return undefined; }
+    if (hit) {
+      cache.delete(key);
+      cache.set(key, hit);
+      setState({ loading: false, candles: hit.candles, error: hit.error || null, symbol: hit.symbol });
+      return undefined;
+    }
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     let alive = true;
     setState((s) => ({ ...s, loading: true, error: null }));
     H.fetchCandles({ symbol: trade.ticker, tf, from: win.view.from, to: win.view.to, limit: 600, signal: ctrl ? ctrl.signal : undefined })
       .then((res) => {
         if (!alive) return;
-        if (!res.error) cache.set(key, res);
+        if (!res.error) {
+          cache.delete(key);
+          cache.set(key, res);
+          if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
+        }
         setState({ loading: false, candles: res.candles || [], error: res.error || null, symbol: res.symbol || '' });
       })
       .catch((err) => {
