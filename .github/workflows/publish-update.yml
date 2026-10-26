@@ -30,6 +30,16 @@ jobs:
           $version = "1.0.$env:GITHUB_RUN_NUMBER"
           npm version $version --no-git-tag-version
 
+      - name: Create and push the release tag
+        shell: pwsh
+        run: |
+          $version = "1.0.$env:GITHUB_RUN_NUMBER"
+          $tag = "v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag $tag
+          git push origin $tag
+
       - name: Prepare bundled ActivityWatch
         shell: pwsh
         run: ./scripts/prepare-activitywatch.ps1
