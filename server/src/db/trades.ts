@@ -279,33 +279,70 @@ export async function bulkInsertTrades(
     isEval?: boolean;
   }>,
 ): Promise<{ imported: number; skipped: number }> {
-  // Dedup: fetch existing trades that share any of the incoming enter_times
-  const enterTimes = [...new Set(trades.map((t) => t.enterTime))];
+  // Dedup candidates by UTC-equivalent timestamp, including legacy rows that still
+  // store an explicit local offset, then compare the full economic signature.
+  const normalizeTime = (t: string) => new Date(t).toISOString().slice(0, 19);
+  const enterTimes = [...new Set(trades.map((t) => normalizeTime(t.enterTime)))];
   const existing: any[] = [];
   for (const group of chunk(enterTimes)) {
     const rows = db
       .prepare(
-        `SELECT ticker, enter_time, exit_time, quantity, account
+        `SELECT ticker, enter_time, exit_time, enter_price, exit_price, quantity,
+                manual_pl, commission, swap, account
          FROM trades
-         WHERE user_id = ? AND enter_time IN (${placeholders(group.length)})`,
+         WHERE user_id = ? AND strftime('%Y-%m-%dT%H:%M:%S', enter_time) IN (${placeholders(group.length)})`,
       )
       .all(userId, ...group);
     existing.push(...rows);
   }
 
-  // Normalize timestamps to second precision (strips ms + tz offset differences)
-  const normalizeTime = (t: string) => new Date(t).toISOString().slice(0, 19);
-
-  const tradeKey = (ticker: string, enterTime: string, exitTime: string, quantity: number, account?: string | null) =>
-    `${ticker}|${normalizeTime(enterTime)}|${normalizeTime(exitTime)}|${Number(quantity).toFixed(2)}|${account || ''}`;
+  const numericKey = (value: number | null | undefined) => value == null ? '' : String(Number(value));
+  const tradeKey = (trade: {
+    ticker: string;
+    enterTime: string;
+    exitTime: string;
+    enterPrice: number;
+    exitPrice: number;
+    quantity: number;
+    manualPL?: number | null;
+    commission?: number | null;
+    swap?: number | null;
+    account?: string | null;
+  }) => JSON.stringify([
+    trade.ticker,
+    normalizeTime(trade.enterTime),
+    normalizeTime(trade.exitTime),
+    numericKey(trade.quantity),
+    numericKey(trade.enterPrice),
+    numericKey(trade.exitPrice),
+    numericKey(trade.manualPL),
+    numericKey(trade.commission),
+    numericKey(trade.swap),
+    trade.account || '',
+  ]);
 
   const existingKeys = new Set<string>(
-    existing.map((r: any) => tradeKey(r.ticker, r.enter_time, r.exit_time, r.quantity, r.account)),
+    existing.map((r: any) => tradeKey({
+      ticker: r.ticker,
+      enterTime: r.enter_time,
+      exitTime: r.exit_time,
+      enterPrice: r.enter_price,
+      exitPrice: r.exit_price,
+      quantity: r.quantity,
+      manualPL: r.manual_pl,
+      commission: r.commission,
+      swap: r.swap,
+      account: r.account,
+    })),
   );
 
-  const newTrades = trades.filter(
-    (t) => !existingKeys.has(tradeKey(t.ticker, t.enterTime, t.exitTime, t.quantity, t.account)),
-  );
+  // Compare only against prior database rows. Repeated-looking CSV rows remain
+  // separate trades because no stable broker fill ID is available to prove they
+  // are duplicates.
+  const newTrades = trades.filter((t) => {
+    const key = tradeKey(t);
+    return !existingKeys.has(key);
+  });
 
   const skipped = trades.length - newTrades.length;
 

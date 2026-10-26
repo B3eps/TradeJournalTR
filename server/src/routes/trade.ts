@@ -12,12 +12,62 @@ type HonoEnv = {
 
 const trade = new Hono<HonoEnv>();
 
+const finiteNumber = (value: unknown): number => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+  if (typeof value !== 'string' || value.trim() === '') return NaN;
+  const n = Number(value.trim());
+  return Number.isFinite(n) ? n : NaN;
+};
+
 /** Parses an optional numeric field (commission, swap). Empty → null. */
 const optionalNumber = (value: unknown): number | null => {
-  if (value === null || value === undefined || value === '') return null;
-  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
+  const n = finiteNumber(value);
   return Number.isFinite(n) ? n : null;
 };
+
+const isPresent = (value: unknown) =>
+  value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === '');
+
+function validateTradeInput(body: any): { error: string } | { error: null; value: any } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'İşlem bilgileri geçersiz.' };
+  const ticker = typeof body.ticker === 'string' ? body.ticker.trim().toUpperCase() : '';
+  const enterDate = typeof body.enterTime === 'string' ? new Date(body.enterTime) : new Date(NaN);
+  const exitDate = typeof body.exitTime === 'string' ? new Date(body.exitTime) : new Date(NaN);
+  const quantity = finiteNumber(body.quantity);
+  const hasPL = isPresent(body.manualPL);
+  const hasEnterPrice = isPresent(body.enterPrice);
+  const hasExitPrice = isPresent(body.exitPrice);
+  const isManualPLOnlySentinel = hasEnterPrice && hasExitPrice && hasPL && finiteNumber(body.enterPrice) === 0 && finiteNumber(body.exitPrice) === 0;
+  const hasPrices = hasEnterPrice && hasExitPrice && !isManualPLOnlySentinel;
+  if (!ticker || ticker.length > 40 || typeof body.enterTime !== 'string' || !body.enterTime.trim() ||
+      typeof body.exitTime !== 'string' || !body.exitTime.trim() || !Number.isFinite(enterDate.getTime()) || !Number.isFinite(exitDate.getTime())) {
+    return { error: 'Sembol ve geçerli giriş/çıkış zamanları zorunludur.' };
+  }
+  if (exitDate < enterDate) return { error: 'Çıkış zamanı giriş zamanından önce olamaz.' };
+  if (!Number.isFinite(quantity) || quantity === 0) return { error: 'Miktar sıfırdan farklı ve sayısal olmalıdır.' };
+  if (hasEnterPrice !== hasExitPrice) return { error: 'Giriş ve çıkış fiyatlarını birlikte girin.' };
+  if (!hasPrices && !hasPL) return { error: 'Giriş/çıkış fiyatı veya manuel K/Z girilmelidir.' };
+  const enterPrice = hasPrices ? finiteNumber(body.enterPrice) : 0;
+  const exitPrice = hasPrices ? finiteNumber(body.exitPrice) : 0;
+  if (hasPrices && (!Number.isFinite(enterPrice) || enterPrice <= 0 || !Number.isFinite(exitPrice) || exitPrice <= 0)) {
+    return { error: 'Giriş ve çıkış fiyatları pozitif sayısal değerler olmalıdır.' };
+  }
+  const manualPL = hasPL ? optionalNumber(body.manualPL) : null;
+  if (hasPL && manualPL === null) return { error: 'Manuel K/Z sayısal olmalıdır.' };
+  const commission = optionalNumber(body.commission);
+  const swap = optionalNumber(body.swap);
+  if ((isPresent(body.commission) && commission === null) || (isPresent(body.swap) && swap === null)) {
+    return { error: 'Komisyon ve swap sayısal olmalıdır.' };
+  }
+  return {
+    error: null,
+    value: {
+      ticker, enterTime: enterDate.toISOString(), exitTime: exitDate.toISOString(), enterPrice, exitPrice,
+      quantity, manualPL, commission, swap,
+    },
+  };
+}
 
 // GET /api/getTrades
 trade.get('/api/getTrades', requiresLogin, async (c) => {
@@ -84,34 +134,19 @@ const makeTradeHandler = async (c: any) => {
   const user = c.get('user');
   const db = c.get('db');
   const body = await c.req.json();
-
-  const hasPrices = body.enterPrice != null && body.enterPrice !== '' && body.exitPrice != null && body.exitPrice !== '';
-  const hasPL = body.manualPL != null && body.manualPL !== '';
-
-  if (!body.ticker || !body.enterTime || !body.exitTime || !body.quantity) {
-    return c.json({ error: 'Sembol, giriş zamanı, çıkış zamanı ve miktar (lot) zorunludur!' }, 400);
-  }
-  if (!hasPrices && !hasPL) {
-    return c.json({ error: 'Giriş/çıkış fiyatı veya manuel K/Z girilmelidir!' }, 400);
-  }
+  const validation = validateTradeInput(body);
+  if (validation.error) return c.json({ error: validation.error }, 400);
+  const input = validation.value;
 
   try {
     const newTrade = await tradesDb.createTrade(db, user.id, {
-      ticker: String(body.ticker).toUpperCase().trim(),
-      enterTime: body.enterTime,
-      exitTime: body.exitTime,
-      enterPrice: hasPrices ? body.enterPrice : 0,
-      exitPrice: hasPrices ? body.exitPrice : 0,
-      quantity: body.quantity,
-      manualPL: hasPL ? optionalNumber(body.manualPL) : null,
-      commission: optionalNumber(body.commission),
-      swap: optionalNumber(body.swap),
-      imageAttachments: body.imageAttachments || [],
-      screenshot: body.screenshot || null,
-      comments: body.comments || '',
+      ...input,
+      imageAttachments: Array.isArray(body.imageAttachments) ? body.imageAttachments.filter((item: unknown): item is string => typeof item === 'string') : [],
+      screenshot: typeof body.screenshot === 'string' ? body.screenshot : null,
+      comments: typeof body.comments === 'string' ? body.comments : '',
       isEval: body.isEval || false,
-      account: body.account || null,
-      tags: body.tags || [],
+      account: typeof body.account === 'string' && body.account.trim() ? body.account.trim() : null,
+      tags: Array.isArray(body.tags) ? body.tags.filter((tag: unknown): tag is string => typeof tag === 'string') : [],
     });
 
     return c.json(newTrade, 201);
@@ -152,33 +187,19 @@ trade.post('/api/updateTrade', requiresLogin, async (c) => {
     return c.json({ error: 'Güncellemek için işlem kimliği gereklidir!' }, 400);
   }
 
-  const hasPricesU = body.enterPrice != null && body.enterPrice !== '' && body.exitPrice != null && body.exitPrice !== '';
-  const hasPLU = body.manualPL != null && body.manualPL !== '';
-
-  if (!body.ticker || !body.enterTime || !body.exitTime || !body.quantity) {
-    return c.json({ error: 'Sembol, giriş zamanı, çıkış zamanı ve miktar (lot) zorunludur!' }, 400);
-  }
-  if (!hasPricesU && !hasPLU) {
-    return c.json({ error: 'Giriş/çıkış fiyatı veya manuel K/Z girilmelidir!' }, 400);
-  }
+  const validation = validateTradeInput(body);
+  if (validation.error) return c.json({ error: validation.error }, 400);
+  const input = validation.value;
 
   try {
     const updated = await tradesDb.updateTrade(db, user.id, {
       _id: body._id,
-      ticker: String(body.ticker).toUpperCase().trim(),
-      enterTime: body.enterTime,
-      exitTime: body.exitTime,
-      enterPrice: hasPricesU ? body.enterPrice : 0,
-      exitPrice: hasPricesU ? body.exitPrice : 0,
-      quantity: body.quantity,
-      manualPL: hasPLU ? optionalNumber(body.manualPL) : null,
-      commission: optionalNumber(body.commission),
-      swap: optionalNumber(body.swap),
-      screenshot: body.screenshot || null,
-      comments: body.comments || '',
+      ...input,
+      screenshot: typeof body.screenshot === 'string' ? body.screenshot : null,
+      comments: typeof body.comments === 'string' ? body.comments : '',
       isEval: body.isEval || false,
-      account: body.account || null,
-      tags: body.tags || [],
+      account: typeof body.account === 'string' && body.account.trim() ? body.account.trim() : null,
+      tags: Array.isArray(body.tags) ? body.tags.filter((tag: unknown): tag is string => typeof tag === 'string') : [],
     });
 
     return c.json(updated);
@@ -194,7 +215,7 @@ trade.post('/api/importTrades', requiresLogin, async (c) => {
   const db = c.get('db');
   const body = await c.req.json();
 
-  if (!body.trades || !Array.isArray(body.trades)) {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.trades)) {
     return c.json({ error: 'İşlem listesi (dizi) gereklidir!' }, 400);
   }
 
@@ -202,35 +223,73 @@ trade.post('/api/importTrades', requiresLogin, async (c) => {
     return c.json({ error: 'Tek seferde en fazla 500 işlem içe aktarılabilir!' }, 400);
   }
 
-  const required = ['ticker', 'enterTime', 'exitTime', 'enterPrice', 'exitPrice', 'quantity'];
+  if (body.trades.length === 0) return c.json({ error: 'İçe aktarılacak işlem bulunamadı.' }, 400);
 
+  const tradeDocs: Parameters<typeof tradesDb.bulkInsertTrades>[2] = [];
   for (let i = 0; i < body.trades.length; i++) {
     const t = body.trades[i];
-    const missingField = required.find((field) => !t[field] && t[field] !== 0);
-    if (missingField) {
-      return c.json(
-        { error: `${i + 1}. işlemde zorunlu alan eksik: ${missingField}` },
-        400,
-      );
+    if (!t || typeof t !== 'object' || Array.isArray(t)) {
+      return c.json({ error: `${i + 1}. işlem geçerli bir nesne değil.` }, 400);
     }
+    const required = ['ticker', 'enterTime', 'exitTime', 'enterPrice', 'exitPrice', 'quantity'];
+    const missingField = required.find((field) => t[field] === null || t[field] === undefined || t[field] === '');
+    if (missingField) {
+      return c.json({ error: `${i + 1}. işlemde zorunlu alan eksik: ${missingField}` }, 400);
+    }
+
+    const ticker = typeof t.ticker === 'string' ? t.ticker.trim().toUpperCase() : '';
+    const enterDate = typeof t.enterTime === 'string' ? new Date(t.enterTime) : new Date(NaN);
+    const exitDate = typeof t.exitTime === 'string' ? new Date(t.exitTime) : new Date(NaN);
+    const enterPrice = finiteNumber(t.enterPrice);
+    const exitPrice = finiteNumber(t.exitPrice);
+    const quantity = finiteNumber(t.quantity);
+    if (!ticker || ticker.length > 40) {
+      return c.json({ error: `${i + 1}. işlemde sembol boş veya çok uzun.` }, 400);
+    }
+    if (!Number.isFinite(enterDate.getTime()) || !Number.isFinite(exitDate.getTime())) {
+      return c.json({ error: `${i + 1}. işlemin giriş veya çıkış zamanı geçersiz.` }, 400);
+    }
+    if (exitDate < enterDate) {
+      return c.json({ error: `${i + 1}. işlemde çıkış zamanı girişten önce olamaz.` }, 400);
+    }
+    if (!Number.isFinite(enterPrice) || enterPrice <= 0 || !Number.isFinite(exitPrice) || exitPrice <= 0) {
+      return c.json({ error: `${i + 1}. işlemde fiyatlar pozitif ve sayısal olmalıdır.` }, 400);
+    }
+    if (!Number.isFinite(quantity) || quantity === 0) {
+      return c.json({ error: `${i + 1}. işlemde miktar sıfırdan farklı ve sayısal olmalıdır.` }, 400);
+    }
+
+    const optionalFields = ['manualPL', 'commission', 'swap'];
+    const optionalValues: Record<string, number | null> = {};
+    for (const field of optionalFields) {
+      const value = t[field];
+      if (value === null || value === undefined || value === '') optionalValues[field] = null;
+      else {
+        const number = finiteNumber(value);
+        if (!Number.isFinite(number)) {
+          return c.json({ error: `${i + 1}. işlemde ${field} sayısal olmalıdır.` }, 400);
+        }
+        optionalValues[field] = number;
+      }
+    }
+
+    tradeDocs.push({
+      ticker,
+      enterTime: enterDate.toISOString(),
+      exitTime: exitDate.toISOString(),
+      enterPrice,
+      exitPrice,
+      quantity,
+      manualPL: optionalValues.manualPL,
+      commission: optionalValues.commission,
+      swap: optionalValues.swap,
+      comments: typeof t.comments === 'string' ? t.comments : '',
+      tags: Array.isArray(t.tags) ? t.tags.filter((tag: unknown): tag is string => typeof tag === 'string') : [],
+      account: typeof t.account === 'string' && t.account.trim() ? t.account.trim() : null,
+    });
   }
 
   try {
-    const tradeDocs = body.trades.map((t: any) => ({
-      ticker: String(t.ticker).toUpperCase().trim(),
-      enterTime: new Date(t.enterTime).toISOString(),
-      exitTime: new Date(t.exitTime).toISOString(),
-      enterPrice: parseFloat(t.enterPrice),
-      exitPrice: parseFloat(t.exitPrice),
-      quantity: parseFloat(t.quantity),
-      manualPL: optionalNumber(t.manualPL),
-      commission: optionalNumber(t.commission),
-      swap: optionalNumber(t.swap),
-      comments: t.comments || '',
-      tags: t.tags || [],
-      account: t.account || null,
-    }));
-
     const result = await tradesDb.bulkInsertTrades(db, user.id, tradeDocs);
     return c.json(result, 201);
   } catch (err) {

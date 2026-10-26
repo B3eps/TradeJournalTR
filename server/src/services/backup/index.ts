@@ -1,14 +1,17 @@
 /**
  * Local backups: `<DATA_DIR>/../yedekler/yedek-YYYYMMDD-HHmm/` holding a
- * consistent SQLite copy (better-sqlite3 online backup API) and manifest.json.
- * The screenshots folder and secret.key are intentionally NOT copied: the
- * encryption key must never land in a folder the user may share or sync.
+ * consistent SQLite copy (better-sqlite3 online backup API), screenshots,
+ * news evaluations and
+ * manifest.json. The encryption key is intentionally NOT copied: a backup
+ * folder may be shared or synced, so portable recovery requires a separately
+ * protected copy of the complete data directory.
  * Restore is manual (documented in the UI).
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
-import { DATA_DIR, DB_PATH } from '../../config';
+import { DATA_DIR, DB_PATH, SCREENSHOTS_DIR, getEnv } from '../../config';
 import { getDb } from '../../db/connection';
 import { getSetting, setSetting, listSettingsByKey } from '../../db/settings';
 import { IntegrationError, bad, optBool, intInRange, optTime, localHm, localYmd, minutesOf } from '../ntfy/http';
@@ -16,8 +19,8 @@ import { IntegrationError, bad, optBool, intInRange, optTime, localHm, localYmd,
 export const BACKUP_KEY = 'backup';
 export const BACKUP_ROOT = path.resolve(process.env.BACKUP_DIR || path.join(path.resolve(DATA_DIR), '..', 'yedekler'));
 const NAME_RE = /^yedek-\d{8}-\d{4}(?:-\d{1,2})?$/;
-const MANIFEST_VERSION = 1;
-const COUNT_TABLES = ['trades', 'tasks', 'projects', 'notes', 'cards', 'daily_notes', 'news_items', 'habits', 'finance_transactions'];
+const MANIFEST_VERSION = 2;
+const COUNT_TABLES = ['trades', 'tasks', 'projects', 'notes', 'cards', 'daily_notes', 'news_items', 'habits', 'fin_transactions'];
 
 export interface BackupSettings { autoEnabled: boolean; hour: string; keep: number }
 export const BACKUP_DEFAULTS: BackupSettings = { autoEnabled: false, hour: '03:00', keep: 14 };
@@ -28,6 +31,9 @@ export interface BackupInfo {
   sizeBytes: number;
   dbFile: string | null;
   counts: Record<string, number> | null;
+  screenshotCount: number | null;
+  evaluationCount: number | null;
+  keyMatches: boolean | null;
   auto: boolean;
 }
 
@@ -75,6 +81,7 @@ export function listBackups(): BackupInfo[] {
     return [];
   }
   const out: BackupInfo[] = [];
+  const currentKeyFingerprint = crypto.createHash('sha256').update(getEnv().ENCRYPTION_KEY).digest('hex');
   for (const name of names) {
     const dir = path.join(BACKUP_ROOT, name);
     try {
@@ -91,6 +98,9 @@ export function listBackups(): BackupInfo[] {
         sizeBytes: dirSize(dir),
         dbFile: manifest && typeof manifest.dbFile === 'string' ? manifest.dbFile : null,
         counts: manifest && manifest.counts && typeof manifest.counts === 'object' ? manifest.counts : null,
+        screenshotCount: Number.isInteger(manifest?.screenshotCount) ? manifest.screenshotCount : null,
+        evaluationCount: Number.isInteger(manifest?.evaluationCount) ? manifest.evaluationCount : null,
+        keyMatches: typeof manifest?.keyFingerprint === 'string' ? manifest.keyFingerprint === currentKeyFingerprint : null,
         auto: !!manifest?.auto,
       });
     } catch { /* vanished */ }
@@ -122,6 +132,26 @@ function stamp(d: Date): string {
   return `${localYmd(d).replace(/-/g, '')}-${localHm(d).replace(':', '')}`;
 }
 
+/** Copy only ordinary files; never follow a symlink out of the data folder. */
+function copyFlatFiles(source: string, destination: string): number {
+  fs.mkdirSync(destination, { recursive: true });
+  if (!fs.existsSync(source)) return 0;
+  let copied = 0;
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    if (!entry.isFile()) throw new Error(`Unsupported backup entry: ${entry.name}`);
+    const sourceFile = path.join(source, entry.name);
+    const destFile = path.join(destination, entry.name);
+    const before = fs.statSync(sourceFile);
+    fs.copyFileSync(sourceFile, destFile);
+    const after = fs.statSync(sourceFile);
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || fs.statSync(destFile).size !== after.size) {
+      throw new Error(`File changed during backup: ${entry.name}`);
+    }
+    copied++;
+  }
+  return copied;
+}
+
 let inflight: Promise<BackupInfo> | null = null;
 let lastError: string | null = null;
 let lastRunAt: string | null = null;
@@ -146,6 +176,10 @@ async function doBackup(opts: { keep: number; auto: boolean }): Promise<BackupIn
   try {
     // Online backup: consistent snapshot even while the app keeps writing (WAL).
     await getDb().backup(path.join(tmpDir, dbFile));
+    const screenshotCount = copyFlatFiles(SCREENSHOTS_DIR, path.join(tmpDir, 'screenshots'));
+    const evaluationCount = copyFlatFiles(path.join(DATA_DIR, 'news-eval'), path.join(tmpDir, 'news-eval'));
+    // Detect a mismatched key at restore time without putting the key in a shareable backup.
+    const keyFingerprint = crypto.createHash('sha256').update(getEnv().ENCRYPTION_KEY).digest('hex');
 
     const counts: Record<string, number> = {};
     const copy = new Database(path.join(tmpDir, dbFile), { readonly: true, fileMustExist: true });
@@ -168,8 +202,11 @@ async function doBackup(opts: { keep: number; auto: boolean }): Promise<BackupIn
       dbFile,
       dbSizeBytes: fs.statSync(path.join(tmpDir, dbFile)).size,
       counts,
-      excluded: ['screenshots/', 'secret.key'],
-      note: 'Şifreleme anahtarı (secret.key) güvenlik nedeniyle yedeğe dahil edilmez. Geri yükleme için uygulamayı kapatın ve .db dosyasını data klasörüne kopyalayın.',
+      screenshotCount,
+      evaluationCount,
+      keyFingerprint,
+      excluded: ['secret.key'],
+      note: 'Bu yerel yedek veritabanını, ekran görüntülerini ve haber değerlendirmelerini içerir. Şifreleme anahtarı dahil değildir. Başka bilgisayara taşımak için uygulama kapalıyken data klasörünü anahtarıyla birlikte ayrıca güvenli şekilde kopyalayın.',
     };
     fs.writeFileSync(path.join(tmpDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
     fs.renameSync(tmpDir, finalDir);

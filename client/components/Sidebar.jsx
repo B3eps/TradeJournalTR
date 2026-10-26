@@ -77,7 +77,7 @@ const NAV_SECTIONS = [
       { id: 'analytics', label: 'Analiz', icon: L.BarChart3 || L.ChartBar, keywords: 'analytics istatistik' },
       { id: 'strategy', label: 'Strateji', icon: L.Target, keywords: 'strategy kural' },
       { id: 'premarket', label: 'Seans Öncesi', icon: L.Sunrise, keywords: 'premarket plan' },
-      { id: 'backtesting', label: 'Geriye Dönük Test', icon: L.FlaskConical, keywords: 'backtest' },
+      { id: 'backtesting', label: 'Test Günlüğü', icon: L.FlaskConical, keywords: 'backtest geriye dönük test' },
       { id: 'syncer', label: 'İşlem Eşitleyici', icon: L.RefreshCw, keywords: 'sync esitle broker' },
     ],
   },

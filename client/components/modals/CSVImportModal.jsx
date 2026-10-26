@@ -3,7 +3,7 @@ const { useState, useEffect } = React;
 const Papa = require('papaparse');
 const helper = require('../../helper.js');
 const { authFetch } = helper;
-const { getESTOffset, getNewYorkOffset } = require('../../utils/dateUtils');
+const { getNewYorkOffset } = require('../../utils/dateUtils');
 const { parseForexSymbol, getContractSize } = require('../../utils/tickValues');
 const Icons = require('../shared/Icons');
 const sound = require('../../utils/sound');
@@ -27,17 +27,18 @@ const KNOWN_BROKER_FORMATS = [
   {
     name: 'Topstep',
     requiredHeaders: ['ContractName', 'EnteredAt', 'ExitedAt', 'EntryPrice', 'ExitPrice', 'PnL', 'Size', 'Type', 'Fees'],
+    numericHeaders: ['EntryPrice', 'ExitPrice', 'PnL', 'Size', 'Fees'],
     transform: (row) => {
       const isShort = row.Type && row.Type.toLowerCase() === 'short';
-      const qty = Math.abs(parseFloat(row.Size) || 0);
-      const pnl = parseFloat(row.PnL) || 0;
-      const fees = parseFloat(row.Fees) || 0;
+      const qty = Math.abs(parseNum(row.Size));
+      const pnl = parseNum(row.PnL);
+      const fees = parseNumOrEmptyZero(row.Fees);
       return {
         ticker: parseContractTicker(row.ContractName),
         enterTime: row.EnteredAt,
         exitTime: row.ExitedAt,
-        enterPrice: row.EntryPrice,
-        exitPrice: row.ExitPrice,
+        enterPrice: parseNum(row.EntryPrice),
+        exitPrice: parseNum(row.ExitPrice),
         quantity: isShort ? -qty : qty,
         manualPL: pnl - fees,
         comments: '',
@@ -47,19 +48,20 @@ const KNOWN_BROKER_FORMATS = [
   {
     name: 'Tradovate (Positions)',
     requiredHeaders: ['Product', 'Avg. Buy', 'Avg. Sell', 'Paired Qty', 'P/L', 'Buy Fill ID', 'Sell Fill ID', 'Bought Timestamp', 'Sold Timestamp'],
+    numericHeaders: ['Avg. Buy', 'Avg. Sell', 'Paired Qty', 'P/L'],
     transform: (row) => {
       const buyFillId = parseInt(row['Buy Fill ID']) || 0;
       const sellFillId = parseInt(row['Sell Fill ID']) || 0;
       const isLong = sellFillId > buyFillId;
-      const qty = Math.abs(parseFloat(row['Paired Qty']) || 0);
+      const qty = Math.abs(parseNum(row['Paired Qty']));
       return {
         ticker: parseContractTicker(row.Product),
         enterTime: isLong ? row['Bought Timestamp'] : row['Sold Timestamp'],
         exitTime: isLong ? row['Sold Timestamp'] : row['Bought Timestamp'],
-        enterPrice: isLong ? row['Avg. Buy'] : row['Avg. Sell'],
-        exitPrice: isLong ? row['Avg. Sell'] : row['Avg. Buy'],
+        enterPrice: parseNum(isLong ? row['Avg. Buy'] : row['Avg. Sell']),
+        exitPrice: parseNum(isLong ? row['Avg. Sell'] : row['Avg. Buy']),
         quantity: isLong ? qty : -qty,
-        manualPL: parseFloat(row['P/L']) || 0,
+        manualPL: parseNum(row['P/L']),
         comments: '',
       };
     },
@@ -67,19 +69,20 @@ const KNOWN_BROKER_FORMATS = [
   {
     name: 'Tradovate (Fills)',
     requiredHeaders: ['symbol', 'buyFillId', 'sellFillId', 'qty', 'buyPrice', 'sellPrice', 'pnl', 'boughtTimestamp', 'soldTimestamp'],
+    numericHeaders: ['qty', 'buyPrice', 'sellPrice', 'pnl'],
     transform: (row) => {
       const buyFillId = parseInt(row.buyFillId) || 0;
       const sellFillId = parseInt(row.sellFillId) || 0;
       const isLong = sellFillId > buyFillId;
-      const qty = Math.abs(parseFloat(row.qty) || 0);
+      const qty = Math.abs(parseNum(row.qty));
       return {
         ticker: parseContractTicker(row.symbol),
         enterTime: isLong ? row.boughtTimestamp : row.soldTimestamp,
         exitTime: isLong ? row.soldTimestamp : row.boughtTimestamp,
-        enterPrice: isLong ? row.buyPrice : row.sellPrice,
-        exitPrice: isLong ? row.sellPrice : row.buyPrice,
+        enterPrice: parseNum(isLong ? row.buyPrice : row.sellPrice),
+        exitPrice: parseNum(isLong ? row.sellPrice : row.buyPrice),
         quantity: isLong ? qty : -qty,
-        manualPL: parseFloat(row.pnl) || 0,
+        manualPL: parseNum(row.pnl),
         comments: '',
       };
     },
@@ -142,7 +145,10 @@ const mapForexHeaders = (headers) => {
 const parseNum = (value) => {
   if (value === null || value === undefined) return NaN;
   if (typeof value === 'number') return value;
-  let s = String(value).replace(/[−–]/g, '-').replace(/[\s  ']/g, '');
+  let s = String(value).trim();
+  const parenthesizedNegative = /^\(.*\)$/.test(s);
+  if (parenthesizedNegative) s = s.slice(1, -1);
+  s = s.replace(/[−–]/g, '-').replace(/[\s  ']/g, '');
   s = s.replace(/[^0-9.,\-]/g, '');
   if (!s) return NaN;
   const lastComma = s.lastIndexOf(',');
@@ -157,8 +163,12 @@ const parseNum = (value) => {
     if (commaCount === 1 && decimals !== 3) s = s.replace(',', '.');
     else s = s.replace(/,/g, '');
   }
-  return parseFloat(s);
+  const parsed = Number(s);
+  return Number.isFinite(parsed) ? (parenthesizedNegative ? -Math.abs(parsed) : parsed) : NaN;
 };
+
+// Empty broker fee fields can mean no fee; malformed non-empty values must stay invalid.
+const parseNumOrEmptyZero = (value) => String(value ?? '').trim() === '' ? 0 : parseNum(value);
 
 // Parses broker date strings into components:
 // "2026.10.21 14:35:12" (MT5), "2026-10-21 14:35:12.123", "21/10/2026 14:35", "21.10.2026 14:35:12"
@@ -180,11 +190,29 @@ const parseBrokerDateParts = (value) => {
 
 // Converts a broker timestamp to an ISO string in the chosen timezone mode.
 const brokerTimeToIso = (value, tzMode) => {
+  // An explicit UTC offset is authoritative; never reinterpret it as local/broker time.
+  if (typeof value === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) {
+    const isoParts = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/i);
+    if (isoParts) {
+      const check = new Date(Date.UTC(+isoParts[1], +isoParts[2] - 1, +isoParts[3], +isoParts[4], +isoParts[5], +isoParts[6]));
+      if (check.getUTCFullYear() !== +isoParts[1] || check.getUTCMonth() !== +isoParts[2] - 1 ||
+          check.getUTCDate() !== +isoParts[3] || check.getUTCHours() !== +isoParts[4] ||
+          check.getUTCMinutes() !== +isoParts[5] || check.getUTCSeconds() !== +isoParts[6]) return null;
+    }
+    const explicit = new Date(value);
+    return isNaN(explicit.getTime()) ? null : explicit.toISOString();
+  }
   const p = parseBrokerDateParts(value);
   if (!p) {
     const d = new Date(value);
-    return isNaN(d.getTime()) ? value : d.toISOString();
+    return isNaN(d.getTime()) ? null : d.toISOString();
   }
+  const calendarCheck = new Date(Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s, p.ms));
+  if (
+    calendarCheck.getUTCFullYear() !== p.y || calendarCheck.getUTCMonth() !== p.mo - 1 ||
+    calendarCheck.getUTCDate() !== p.d || calendarCheck.getUTCHours() !== p.h ||
+    calendarCheck.getUTCMinutes() !== p.mi || calendarCheck.getUTCSeconds() !== p.s
+  ) return null;
   let d;
   if (tzMode === 'utc') {
     d = new Date(Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s, p.ms));
@@ -195,7 +223,127 @@ const brokerTimeToIso = (value, tzMode) => {
   } else {
     d = new Date(p.y, p.mo - 1, p.d, p.h, p.mi, p.s, p.ms);
   }
-  return isNaN(d.getTime()) ? value : d.toISOString();
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+const localTimeToIso = (ts) => {
+  if (!ts) return ts;
+  const s = String(ts).trim();
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+    const isoParts = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/i);
+    if (isoParts) {
+      const check = new Date(Date.UTC(+isoParts[1], +isoParts[2] - 1, +isoParts[3], +isoParts[4], +isoParts[5], +isoParts[6]));
+      if (check.getUTCFullYear() !== +isoParts[1] || check.getUTCMonth() !== +isoParts[2] - 1 ||
+          check.getUTCDate() !== +isoParts[3] || check.getUTCHours() !== +isoParts[4] ||
+          check.getUTCMinutes() !== +isoParts[5] || check.getUTCSeconds() !== +isoParts[6]) return null;
+    }
+    const explicit = new Date(s);
+    return isNaN(explicit.getTime()) ? null : explicit.toISOString();
+  }
+  const parts = parseBrokerDateParts(s);
+  if (parts) {
+    const check = new Date(Date.UTC(parts.y, parts.mo - 1, parts.d, parts.h, parts.mi, parts.s, parts.ms));
+    if (check.getUTCFullYear() !== parts.y || check.getUTCMonth() !== parts.mo - 1 || check.getUTCDate() !== parts.d ||
+        check.getUTCHours() !== parts.h || check.getUTCMinutes() !== parts.mi || check.getUTCSeconds() !== parts.s) return null;
+    const local = new Date(parts.y, parts.mo - 1, parts.d, parts.h, parts.mi, parts.s, parts.ms);
+    if (local.getFullYear() !== parts.y || local.getMonth() !== parts.mo - 1 || local.getDate() !== parts.d ||
+        local.getHours() !== parts.h || local.getMinutes() !== parts.mi || local.getSeconds() !== parts.s) return null;
+    return local.toISOString();
+  }
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const year = +ymd[1], month = +ymd[2], day = +ymd[3];
+    const check = new Date(Date.UTC(year, month - 1, day));
+    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+    return new Date(year, month - 1, day).toISOString();
+  }
+  const fallback = new Date(s);
+  return isNaN(fallback.getTime()) ? null : fallback.toISOString();
+};
+
+const prepareImportRows = (rows, isForexExport, forexTz) => {
+  const valid = [];
+  const issues = [];
+  const convertTime = isForexExport ? (ts) => brokerTimeToIso(ts, forexTz) : localTimeToIso;
+  const numberValue = (value) => (typeof value === 'number' ? value : parseNum(value));
+
+  rows.forEach((row, index) => {
+    const sourceRow = Number(row.sourceRow) || index + 1;
+    const ticker = parseContractTicker(row.ticker);
+    const enterTime = convertTime(row.enterTime);
+    const exitTime = convertTime(row.exitTime);
+    const enterMs = new Date(enterTime).getTime();
+    const exitMs = new Date(exitTime).getTime();
+    const enterPrice = numberValue(row.enterPrice);
+    const exitPrice = numberValue(row.exitPrice);
+    const quantity = numberValue(row.quantity);
+    const manualPL = row.manualPL == null || row.manualPL === '' ? null : numberValue(row.manualPL);
+    const commission = row.commission == null || row.commission === '' ? null : numberValue(row.commission);
+    const swap = row.swap == null || row.swap === '' ? null : numberValue(row.swap);
+    const reasons = [];
+
+    if (!ticker) reasons.push('sembol eksik');
+    if (!row.enterTime || !Number.isFinite(enterMs)) reasons.push('giriş zamanı geçersiz');
+    if (!row.exitTime || !Number.isFinite(exitMs)) reasons.push('çıkış zamanı geçersiz');
+    if (Number.isFinite(enterMs) && Number.isFinite(exitMs) && exitMs < enterMs) reasons.push('çıkış zamanı girişten önce');
+    if (!Number.isFinite(enterPrice) || enterPrice <= 0) reasons.push('giriş fiyatı geçersiz');
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) reasons.push('çıkış fiyatı geçersiz');
+    if (!Number.isFinite(quantity) || quantity === 0) reasons.push('miktar sıfır veya geçersiz');
+    if (manualPL !== null && !Number.isFinite(manualPL)) reasons.push('K/Z sayısal değil');
+    if (commission !== null && !Number.isFinite(commission)) reasons.push('komisyon sayısal değil');
+    if (swap !== null && !Number.isFinite(swap)) reasons.push('swap sayısal değil');
+
+    if (reasons.length > 0) {
+      issues.push({ sourceRow, reasons });
+      return;
+    }
+
+    valid.push({
+      sourceRow,
+      ticker,
+      enterTime,
+      exitTime,
+      enterPrice,
+      exitPrice,
+      quantity,
+      manualPL,
+      commission,
+      swap,
+      comments: typeof row.comments === 'string' ? row.comments : '',
+      account: typeof row.account === 'string' && row.account.trim() ? row.account.trim() : null,
+    });
+  });
+
+  return { valid, issues };
+};
+
+const downloadRejectedRows = (issues) => {
+  if (!issues || issues.length === 0) return;
+  const escapeCell = (value) => `"${String(value).replace(/"/g, '""')}"`;
+  const rows = [['Kayıt', 'Neden'], ...issues.map((issue) => [issue.sourceRow, issue.reasons.join('; ')])];
+  const csv = `\uFEFF${rows.map((row) => row.map(escapeCell).join(';')).join('\r\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `islem-ice-aktarma-hatalari-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const findAmbiguousCommaValues = (rows, columns) => {
+  const samples = [];
+  let count = 0;
+  const pattern = /^[-+]?\d+,\d{3}$/;
+  for (let i = 0; i < rows.length; i++) {
+    for (const column of columns.filter(Boolean)) {
+      const value = rows[i]?.[column];
+      if (typeof value === 'string' && pattern.test(value.trim())) {
+        count++;
+        if (samples.length < 5) samples.push({ record: i + 1, column, value: value.trim() });
+      }
+    }
+  }
+  return { count, samples };
 };
 
 const buildForexTransform = (map) => (row) => {
@@ -280,12 +428,14 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
   const [detectedFormat, setDetectedFormat] = useState(null);
   const [isForexExport, setIsForexExport] = useState(false);
   const [forexTz, setForexTz] = useState('local');
+  const [numberWarnings, setNumberWarnings] = useState({ count: 0, samples: [] });
 
   useEffect(() => {
     if (!isOpen) {
       setStep(1); setCsvData([]); setCsvHeaders([]); setColumnMap({});
       setMappedTrades([]); setImporting(false); setImportResult(null);
       setError(null); setDetectedFormat(null); setIsForexExport(false); setForexTz('local');
+      setNumberWarnings({ count: 0, samples: [] });
     }
   }, [isOpen]);
 
@@ -317,9 +467,9 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
         );
 
         if (knownFormat) {
+          setNumberWarnings(findAmbiguousCommaValues(results.data, knownFormat.numericHeaders));
           const trades = results.data
-            .map(knownFormat.transform)
-            .filter(t => t.ticker && t.enterTime && t.exitTime);
+            .map((row, index) => ({ ...knownFormat.transform(row), sourceRow: index + 1 }));
           setDetectedFormat(knownFormat.name);
           setIsForexExport(false);
           setMappedTrades(trades);
@@ -334,13 +484,9 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
           const fxMap = mapForexHeaders(headers);
           const missing = FOREX_FIELDS.filter(f => f.required && !fxMap[f.key]);
           if (missing.length === 0) {
-            const trades = results.data
-              .map(buildForexTransform(fxMap))
-              .filter(t => t.ticker && t.enterTime && t.exitTime && !isNaN(t.enterPrice) && !isNaN(t.exitPrice) && t.quantity);
-            if (trades.length === 0) {
-              setError('Dosyada içe aktarılabilecek kapanmış pozisyon bulunamadı. cTrader\'da "Geçmiş" (History) sekmesini, MT5\'te "Pozisyonlar" raporunu CSV olarak dışa aktardığınızdan emin olun.');
-              return;
-            }
+            const transform = buildForexTransform(fxMap);
+            setNumberWarnings(findAmbiguousCommaValues(results.data, [fxMap.volume, fxMap.openPrice, fxMap.closePrice, fxMap.commission, fxMap.swap, fxMap.netPL]));
+            const trades = results.data.map((row, index) => ({ ...transform(row), sourceRow: index + 1 }));
             setDetectedFormat(detectForexPlatform(headers));
             setIsForexExport(true);
             setMappedTrades(trades);
@@ -353,6 +499,7 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
 
         // Unknown format — fall through to manual column mapping
         setIsForexExport(false);
+        setNumberWarnings({ count: 0, samples: [] });
         setCsvData(results.data);
         setCsvHeaders(headers);
         const autoMap = {};
@@ -376,17 +523,26 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
       return;
     }
 
-    const trades = csvData.map(row => {
+    const trades = csvData.map((row, index) => {
       const trade = {};
       CSV_TRADE_FIELDS.forEach(field => {
         if (columnMap[field.key]) {
-          trade[field.key] = row[columnMap[field.key]];
+          const value = row[columnMap[field.key]];
+          if (['enterPrice', 'exitPrice', 'quantity', 'manualPL'].includes(field.key)) {
+            const parsed = parseNum(value);
+            trade[field.key] = Number.isFinite(parsed) ? parsed : value;
+          } else {
+            trade[field.key] = value;
+          }
         }
       });
-      return trade;
-    }).filter(t => t.ticker && t.enterTime && t.exitTime)
-      .map(t => ({ ...t, ticker: parseContractTicker(t.ticker) }));
+      return { ...trade, sourceRow: index + 1, ticker: parseContractTicker(trade.ticker) };
+    });
 
+    setNumberWarnings(findAmbiguousCommaValues(
+      csvData,
+      ['enterPrice', 'exitPrice', 'quantity', 'manualPL', 'commission', 'swap'].map((field) => columnMap[field]),
+    ));
     setMappedTrades(trades);
     setStep(3);
   };
@@ -395,35 +551,26 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
     setImporting(true);
     setError(null);
     try {
-      // CSV timestamps carry no timezone info; they are read as local time (the app's timezone).
-      // Append the local offset so the server stores the correct UTC value instead of treating them as UTC.
-      const toLocalIso = (ts) => {
-        if (!ts) return ts;
-        const s = String(ts).trim();
-        const offset = getESTOffset(new Date(s));
-        // Normalize "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM:SS" for reliable parsing
-        const normalized = s.replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:)/, '$1T$2');
-        const d = new Date(normalized + offset);
-        return isNaN(d.getTime()) ? s : d.toISOString();
-      };
-      // Forex platform exports use the platform's display timezone (chosen by the user)
-      const convertTime = isForexExport ? (ts) => brokerTimeToIso(ts, forexTz) : toLocalIso;
-      const tradesToSend = mappedTrades.map(t => ({
-        ...t,
-        enterTime: convertTime(t.enterTime),
-        exitTime: convertTime(t.exitTime),
-        account: t.account || null,
-      }));
+      const prepared = prepareImportRows(mappedTrades, isForexExport, forexTz);
+      if (prepared.valid.length === 0) {
+        setError('İçe aktarılabilecek geçerli işlem bulunamadı. Satır hatalarını gözden geçirin.');
+        return;
+      }
+      if (prepared.valid.length > 500) {
+        setError('Tek seferde en fazla 500 geçerli işlem aktarılabilir. CSV dosyasını bölüp yeniden deneyin.');
+        return;
+      }
+      const tradesToSend = prepared.valid.map(({ sourceRow, ...trade }) => trade);
       const response = await authFetch('/api/importTrades', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trades: tradesToSend }),
       });
       const data = await response.json();
-      if (data.error) {
-        setError(data.error);
+      if (!response.ok || data.error) {
+        setError(data.error || `İçe aktarma başarısız oldu (HTTP ${response.status}).`);
       } else {
-        setImportResult(data);
+        setImportResult({ ...data, rejectedRows: prepared.issues.length, issues: prepared.issues });
         sound.play('complete-all');
         triggerReload();
         if (data.skipped > 0 && onDuplicatesSkipped) {
@@ -432,9 +579,12 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
       }
     } catch (err) {
       setError('İçe aktarma başarısız oldu. Lütfen tekrar deneyin.');
+    } finally {
+      setImporting(false);
     }
-    setImporting(false);
   };
+
+  const preparedPreview = prepareImportRows(mappedTrades, isForexExport, forexTz);
 
   if (!isOpen) return null;
 
@@ -508,6 +658,13 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                   <span className="text-positive text-xs font-medium">{detectedFormat} formatı algılandı — sütunlar otomatik eşleştirildi</span>
                 </div>
               )}
+              {numberWarnings.count > 0 && (
+                <div role="alert" className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  <p className="font-semibold">{numberWarnings.count} sayı virgül nedeniyle belirsiz olabilir.</p>
+                  <p className="mt-1">Örneğin 1,234 şu an 1234 olarak yorumlanır. Ondalık değer kastettiyseniz CSV'de 1.234 biçimine çevirip dosyayı yeniden seçin.</p>
+                  <p className="mt-1 text-warning/80">Örnekler: {numberWarnings.samples.map((sample) => `kayıt ${sample.record}, ${sample.column}: ${sample.value}`).join(' · ')}</p>
+                </div>
+              )}
               {isForexExport && (
                 <div className="flex items-center gap-3">
                   <span className="text-text-secondary text-sm flex-shrink-0">Dosyadaki saatlerin zaman dilimi</span>
@@ -522,12 +679,30 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                   </select>
                 </div>
               )}
-              <p className="text-text-secondary text-sm">{mappedTrades.length} işlem içe aktarılmaya hazır. Önizleme (ilk 50):</p>
+              <p className="text-text-secondary text-sm">
+                CSV'de {mappedTrades.length} satır: {preparedPreview.valid.length} geçerli, {preparedPreview.issues.length} hatalı. Önizleme (ilk 50 geçerli işlem):
+              </p>
+              {preparedPreview.issues.length > 0 && (
+                <div role="status" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  <p className="font-semibold mb-1">Hatalı satırlar içe aktarılmayacak:</p>
+                  <ul className="list-disc pl-5 space-y-0.5">
+                    {preparedPreview.issues.slice(0, 8).map((issue) => (
+                      <li key={issue.sourceRow}>CSV kaydı {issue.sourceRow}: {issue.reasons.join(', ')}</li>
+                    ))}
+                  </ul>
+                  {preparedPreview.issues.length > 8 && <p className="mt-1">ve {preparedPreview.issues.length - 8} satır daha.</p>}
+                </div>
+              )}
+              {preparedPreview.valid.length > 500 && (
+                <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  Tek seferde en fazla 500 işlem aktarılabilir. Dosyayı bölüp yeniden seçin.
+                </div>
+              )}
               <div className="overflow-x-auto border border-border rounded-lg">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border bg-bg-input">
-                      <th className="px-3 py-2 text-left text-text-tertiary font-medium">#</th>
+                      <th className="px-3 py-2 text-left text-text-tertiary font-medium">Kayıt</th>
                       <th className="px-3 py-2 text-left text-text-tertiary font-medium">Sembol</th>
                       <th className="px-3 py-2 text-left text-text-tertiary font-medium">Giriş Zamanı</th>
                       <th className="px-3 py-2 text-left text-text-tertiary font-medium">Çıkış Zamanı</th>
@@ -538,9 +713,9 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                     </tr>
                   </thead>
                   <tbody>
-                    {mappedTrades.slice(0, 50).map((t, i) => (
+                    {preparedPreview.valid.slice(0, 50).map((t, i) => (
                       <tr key={i} className="border-b border-border/50">
-                        <td className="px-3 py-1.5 text-text-muted">{i + 1}</td>
+                        <td className="px-3 py-1.5 text-text-muted">{t.sourceRow}</td>
                         <td className="px-3 py-1.5 font-mono text-text-primary font-semibold">{t.ticker}</td>
                         <td className="px-3 py-1.5 text-text-secondary">{t.enterTime}</td>
                         <td className="px-3 py-1.5 text-text-secondary">{t.exitTime}</td>
@@ -555,8 +730,8 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                   </tbody>
                 </table>
               </div>
-              {mappedTrades.length > 50 && (
-                <p className="text-text-muted text-xs">...ve {mappedTrades.length - 50} işlem daha</p>
+              {preparedPreview.valid.length > 50 && (
+                <p className="text-text-muted text-xs">...ve {preparedPreview.valid.length - 50} işlem daha</p>
               )}
             </div>
           )}
@@ -568,7 +743,27 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
                 <Icons.Check className="w-8 h-8 text-positive" />
               </div>
               <h3 className="text-text-primary font-semibold text-lg mb-2">İçe Aktarma Tamamlandı</h3>
-              <p className="text-text-secondary text-sm">{importResult.imported} işlem başarıyla içe aktarıldı.{importResult.skipped > 0 ? ` ${importResult.skipped} tekrar eden işlem atlandı.` : ''}</p>
+              <p className="text-text-secondary text-sm">
+                {importResult.imported} işlem başarıyla içe aktarıldı.
+                {importResult.skipped > 0 ? ` ${importResult.skipped} tekrar eden işlem atlandı.` : ''}
+                {importResult.rejectedRows > 0 ? ` ${importResult.rejectedRows} hatalı satır içe aktarılmadı.` : ''}
+              </p>
+              {importResult.issues?.length > 0 && (
+                <div className="mx-auto mt-4 max-w-lg rounded-lg border border-warning/30 bg-warning/10 p-3 text-left">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-warning text-xs font-semibold">Reddedilen kayıtlar</p>
+                    <button className="text-xs text-accent hover:underline" onClick={() => downloadRejectedRows(importResult.issues)}>
+                      Raporu indir
+                    </button>
+                  </div>
+                  <ul className="text-xs text-text-secondary space-y-1">
+                    {importResult.issues.slice(0, 8).map((issue) => (
+                      <li key={issue.sourceRow}>Kayıt {issue.sourceRow}: {issue.reasons.join(', ')}</li>
+                    ))}
+                  </ul>
+                  {importResult.issues.length > 8 && <p className="mt-1 text-xs text-text-muted">Raporda {importResult.issues.length - 8} kayıt daha var.</p>}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -598,9 +793,9 @@ const CSVImportModal = ({ isOpen, onClose, triggerReload, onDuplicatesSkipped })
               <button
                 className="px-4 py-2 bg-accent text-accent-text text-sm font-semibold rounded-lg hover:brightness-110 transition-all disabled:opacity-50"
                 onClick={handleImport}
-                disabled={importing}
+                disabled={importing || preparedPreview.valid.length === 0 || preparedPreview.valid.length > 500}
               >
-                {importing ? 'İçe aktarılıyor...' : `${mappedTrades.length} İşlemi İçe Aktar`}
+                {importing ? 'İçe aktarılıyor...' : `${preparedPreview.valid.length} İşlemi İçe Aktar`}
               </button>
             )}
           </div>

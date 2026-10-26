@@ -141,6 +141,24 @@ export async function logOrder(
   return row as SyncerOrderLogRow;
 }
 
+/** Reserve this leader/follower pair before any external side effect. A failed or
+ * uncertain attempt remains reserved until a human reconciles it with the broker.
+ */
+export function claimMirrorOrder(
+  db: Db,
+  configId: string,
+  leaderOrderId: number,
+  followerAccountId: number,
+): boolean {
+  const result = db.prepare(
+    `INSERT INTO syncer_order_log
+      (id, config_id, leader_order_id, follower_account_id, status, created_at)
+     VALUES (?, ?, ?, ?, 'pending', ?)
+     ON CONFLICT(config_id, leader_order_id, follower_account_id) DO NOTHING`,
+  ).run(generateId(), configId, leaderOrderId, followerAccountId, new Date().toISOString());
+  return result.changes === 1;
+}
+
 export async function getRecentLogs(
   db: Db,
   configId: string,

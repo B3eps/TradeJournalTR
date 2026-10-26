@@ -4,6 +4,7 @@ const { useState, useCallback } = React;
 const { AnimatedCheck, ProgressRing, CountUp, Stagger, StaggerItem } = require('../ui/motion');
 const { useSound } = require('../../utils/sound');
 const { parseTaskInput } = require('../../utils/taskParse');
+const { navigate } = require('../../utils/navigation');
 const { request, localToday, enc } = require('./api');
 const { useResource } = require('./hooks');
 const { Card, Skeleton, ErrorNote, Empty, MiniBars, Icon, normalizeDaily } = require('./ui');
@@ -85,7 +86,7 @@ const TasksWidget = ({ onNavigate }) => {
                   return (
                     <StaggerItem key={t.id} y={4} className="flex items-center gap-3 py-2 border-b border-border/60 last:border-0">
                       <AnimatedCheck checked={false} onChange={() => complete(t)} sound="complete" size={18} aria-label={`Tamamla: ${t.title}`} />
-                      <button type="button" onClick={() => onNavigate('tasks')} className={`flex-1 min-w-0 text-left text-sm truncate ${overdue ? 'text-negative' : 'text-text-primary'}`}>
+                      <button type="button" onClick={() => navigate('tasks', t.id)} className={`flex-1 min-w-0 text-left text-sm truncate ${overdue ? 'text-negative' : 'text-text-primary'}`}>
                         {t.title}
                       </button>
                       {(t.dueTime || overdue) && (

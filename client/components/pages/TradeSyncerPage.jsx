@@ -125,6 +125,7 @@ const LOG_STATUS_LABELS = {
   filled: 'gerçekleşti',
   placed: 'verildi',
   pending: 'beklemede',
+  uncertain: 'kontrol gerekli',
   failed: 'başarısız',
   cancelled: 'iptal edildi',
 };
@@ -134,7 +135,6 @@ const ACTION_TYPE_LABELS = {
   order: 'emir',
   cancel: 'iptal',
   modify: 'değiştir',
-  position_sync: 'pozisyon senkronu',
 };
 
 // Display labels for account roles
@@ -162,11 +162,13 @@ const ConnectionStatus = ({ status }) => {
 
 const OrderLog = ({ logs }) => {
   if (!logs || logs.length === 0) return null;
+  const hasUncertain = logs.some((log) => log.status === 'uncertain' || log.status === 'pending');
 
   const statusColor = {
     filled: 'text-positive',
     placed: 'text-positive',
     pending: 'text-warning',
+    uncertain: 'text-warning',
     failed: 'text-negative',
     cancelled: 'text-text-muted',
   };
@@ -174,6 +176,11 @@ const OrderLog = ({ logs }) => {
   return (
     <div className="bg-bg-surface border border-border rounded-xl p-4 mt-4">
       <h3 className="text-text-secondary text-xs font-semibold uppercase tracking-wider mb-3">Emir Günlüğü</h3>
+      {hasUncertain && (
+        <div role="alert" className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+          Beklemede veya sonucu belirsiz emir var. Otomatik tekrar yapılmaz; senkronizasyonu durdurup broker demo hesabında emrin durumunu elle kontrol edin.
+        </div>
+      )}
       <div className="max-h-60 overflow-y-auto space-y-1">
         {logs.map((log, i) => (
           <div key={log.id || i} className="text-xs py-1.5 border-b border-border/30 last:border-0">
@@ -221,15 +228,10 @@ const TradeSyncerPage = () => {
   const statusIntervalRef = useRef(null);
   const logsIntervalRef = useRef(null);
   const configLoadedRef = useRef(false);
-  const hasConnectedRef = useRef(false);
 
   // Client-side dedup: tracks mirrored leader orders with their last known state
   // Map<leaderOrderId, { price, stopPrice, orderQty }>
   const mirroredOrdersRef = useRef(new Map());
-
-  // Leader positions tracked from WebSocket events
-  // Map<contractId, netPos>
-  const leaderPositionsRef = useRef(new Map());
 
   // Sequential mirror request queue
   const mirrorQueueRef = useRef(Promise.resolve());
@@ -282,7 +284,7 @@ const TradeSyncerPage = () => {
       // Extract prices — Tradovate WS may use various field names
       const price = entity.price ?? entity.limitPrice ?? undefined;
       const stopPrice = entity.stopPrice ?? entity.triggerPrice ?? undefined;
-      const orderQty = entity.orderQty ?? entity.qty ?? 1;
+      const orderQty = entity.orderQty ?? entity.qty;
 
       // Determine order type from explicit ordType first, then infer from prices
       let orderType = entity.ordType || entity.orderType;
@@ -293,7 +295,8 @@ const TradeSyncerPage = () => {
         else orderType = 'Market';
       }
 
-      // Skip market orders — they execute instantly, position sync handles them
+      // Market orders are not mirrored. Partial WebSocket position state must
+      // never create follower market orders.
       if (orderType === 'Market') return;
 
       const existing = mirroredOrdersRef.current.get(orderId);
@@ -339,33 +342,12 @@ const TradeSyncerPage = () => {
       }
     } else if (ordStatus === 'Filled') {
       mirroredOrdersRef.current.delete(orderId);
-      // Trigger position sync to reconcile
-      const positions = Array.from(leaderPositionsRef.current.entries())
-        .map(([contractId, netPos]) => ({ contractId, netPos }));
-      if (positions.length > 0) {
-        enqueueMirror({ type: 'position_sync', positions });
-      }
     }
   }, [enqueueMirror]);
-
-  const handleWsPosition = useCallback((entity) => {
-    leaderPositionsRef.current.set(entity.contractId, entity.netPos);
-  }, []);
 
   const handleWsStatus = useCallback((status) => {
     setWsStatus(status);
-    // On reconnect after initial connection, do a position sync to catch missed events
-    if (status === 'subscribed' && hasConnectedRef.current) {
-      const positions = Array.from(leaderPositionsRef.current.entries())
-        .map(([contractId, netPos]) => ({ contractId, netPos }));
-      if (positions.length > 0) {
-        enqueueMirror({ type: 'position_sync', positions });
-      }
-    }
-    if (status === 'subscribed') {
-      hasConnectedRef.current = true;
-    }
-  }, [enqueueMirror]);
+  }, []);
 
   const handleWsError = useCallback((err) => {
     setError(`WebSocket: ${err.message || 'Bağlantı hatası'}`);
@@ -514,8 +496,6 @@ const TradeSyncerPage = () => {
 
       // 3. Reset client state
       mirroredOrdersRef.current.clear();
-      leaderPositionsRef.current.clear();
-      hasConnectedRef.current = false;
       setSessionActions([]);
 
       // 4. Create WebSocket connection
@@ -525,7 +505,6 @@ const TradeSyncerPage = () => {
         leaderAccountId: tokenData.leaderAccountId,
         refreshToken: fetchToken,
         onOrder: handleWsOrder,
-        onPosition: handleWsPosition,
         onStatus: handleWsStatus,
         onError: handleWsError,
       });
@@ -654,6 +633,9 @@ const TradeSyncerPage = () => {
           </p>
           <p className="text-text-muted text-xs mt-1">
             Bu sayfa açık kalmalıdır. En iyi sonuç için Trade Günlüğü sekmesini aktif tutun.
+          </p>
+          <p className="text-warning text-xs mt-1">
+            Güvenlik nedeniyle yalnızca demo hesaplar arasında doğrulanmış bekleyen emirler yansıtılır; piyasa emirleri ve otomatik pozisyon eşitlemesi kapalıdır.
           </p>
         </div>
         {isActive && <ConnectionStatus status={wsStatus} />}

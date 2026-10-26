@@ -4,6 +4,7 @@ const helper = require('../../helper.js');
 const { authFetch } = helper;
 const Icons = require('../shared/Icons');
 const newsNotify = require('../../utils/newsNotify');
+const navigation = require('../../utils/navigation');
 
 // =====================================================
 // LIVE NEWS FEED PAGE ("Canlı Haberler")
@@ -206,6 +207,7 @@ const NewsCard = ({ item, now, isNew, copiedId, askingId, onAsk }) => {
   return (
     <article
       id={`news-item-${item.id}`}
+      tabIndex={-1}
       className={`bg-bg-surface border rounded-xl p-4 ${imp.border}`}
       aria-label={item.title}
     >
@@ -308,6 +310,7 @@ const NewsFeedPage = () => {
   const [askError, setAskError] = useState('');
   const [notify, setNotifyState] = useState(newsNotify.loadSettings);
   const [notifyMsg, setNotifyMsg] = useState('');
+  const [targetId, setTargetId] = useState(null);
 
   const mountedRef = useRef(true);
   const baselineRef = useRef(null); // Set of ids present on first successful load
@@ -343,11 +346,25 @@ const NewsFeedPage = () => {
 
   useEffect(() => {
     mountedRef.current = true;
+    const pendingItem = navigation.consumePendingItem('newsfeed');
+    if (pendingItem && pendingItem.itemId != null) {
+      setPrefs({ tab: 'all', minImportance: 0 });
+      setTargetId(String(pendingItem.itemId));
+    }
+    const onNavigate = (event) => {
+      const detail = event && event.detail;
+      if (!detail || detail.page !== 'newsfeed' || detail.itemId == null) return;
+      navigation.consumePendingItem('newsfeed');
+      setPrefs({ tab: 'all', minImportance: 0 });
+      setTargetId(String(detail.itemId));
+    };
+    window.addEventListener(navigation.NAV_EVENT, onNavigate);
     load();
     const poll = setInterval(() => load(), POLL_MS);
     const tick = setInterval(() => setNow(Date.now()), 30 * 1000);
     return () => {
       mountedRef.current = false;
+      window.removeEventListener(navigation.NAV_EVENT, onNavigate);
       clearInterval(poll);
       clearInterval(tick);
       if (copiedTimer.current) clearTimeout(copiedTimer.current);
@@ -404,6 +421,18 @@ const NewsFeedPage = () => {
     (prefs.tab === 'all' || it.category === prefs.tab) &&
     (Number(it.importance) || 0) >= prefs.minImportance
   ), [items, prefs]);
+
+  useEffect(() => {
+    if (!targetId || !visibleItems.some((item) => String(item.id) === targetId)) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(`news-item-${targetId}`);
+      if (!element) return;
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element.focus({ preventScroll: true });
+      setTargetId(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targetId, visibleItems]);
 
   const criticalItem = useMemo(() => items.find(it => {
     const ts = new Date(it.publishedAt).getTime();

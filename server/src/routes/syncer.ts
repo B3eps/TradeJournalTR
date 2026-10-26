@@ -8,6 +8,7 @@ import * as brokerDb from '../db/broker-connections';
 import * as tvConnDb from '../db/tradovate-connections';
 import { decrypt } from '../utils/crypto';
 import { TradovateAPI } from '../services/TradovateAPI';
+import { mirroredQuantity, positiveId, validLimitPrice } from '../services/syncer/safety';
 
 type HonoEnv = {
   Bindings: Env;
@@ -131,6 +132,21 @@ syncer.post('/api/syncer/start', async (c) => {
     if (!config.follower_accounts || config.follower_accounts.length === 0) {
       return c.json({ error: 'No follower accounts configured.' }, 400);
     }
+    if (!positiveId(config.leader_account_id)
+      || config.follower_accounts.some((follower) => !positiveId(follower.accountId)
+        || typeof follower.multiplier !== 'number' || !Number.isFinite(follower.multiplier) || follower.multiplier <= 0
+        || (follower.connectionId === config.leader_connection_id
+          && follower.accountId === config.leader_account_id))) {
+      return c.json({ error: 'Lider ve takipçi hesap ayarları geçersiz.' }, 400);
+    }
+
+    // Until broker reconciliation is implemented, allow simulation accounts only.
+    const owned = await brokerDb.findByOwnerAndBroker(db, user.id, 'tradovate');
+    const demoIds = new Set(owned.filter((connection) => connection.environment === 'demo').map((connection) => connection.id));
+    if (!demoIds.has(config.leader_connection_id)
+      || config.follower_accounts.some((follower) => !demoIds.has(follower.connectionId))) {
+      return c.json({ error: 'Canlı hesaplarda emir kopyalama güvenlik nedeniyle kapalıdır.' }, 403);
+    }
 
     await syncerDb.setActive(db, config.id, true);
     return c.json({ ok: true, message: 'Syncer started.' });
@@ -172,12 +188,23 @@ syncer.get('/api/syncer/token', async (c) => {
     if (!config || !config.leader_connection_id || !config.leader_account_id) {
       return c.json({ error: 'Leader account not configured.' }, 400);
     }
+    if (!config.is_active) {
+      return c.json({ error: 'Senkronizasyon etkin değil.' }, 409);
+    }
+    const owned = await brokerDb.findByOwnerAndBroker(db, user.id, 'tradovate');
+    const leaderConnection = owned.find((connection) => connection.id === config.leader_connection_id);
+    if (!leaderConnection || leaderConnection.environment !== 'demo'
+      || config.follower_accounts.some((follower) =>
+        !owned.some((connection) => connection.id === follower.connectionId && connection.environment === 'demo'))) {
+      return c.json({ error: 'Canlı hesap yapılandırmasında erişim belirteci verilmez; senkronizasyonu durdurun.' }, 403);
+    }
 
     const { token, environment } = await ensureFreshToken(c.env, config.leader_connection_id);
+    if (environment !== 'demo') {
+      return c.json({ error: 'Canlı hesap belirteci bu akışta verilmez.' }, 403);
+    }
 
-    const wsUrl = environment === 'live'
-      ? 'wss://live.tradovateapi.com/v1/websocket'
-      : 'wss://demo.tradovateapi.com/v1/websocket';
+    const wsUrl = 'wss://demo.tradovateapi.com/v1/websocket';
 
     return c.json(
       { token, wsUrl, leaderAccountId: config.leader_account_id },
@@ -192,7 +219,7 @@ syncer.get('/api/syncer/token', async (c) => {
 
 // ─── POST /api/syncer/mirror ─────────────────────────────────────────────────
 // Handles mirror requests from the browser WebSocket client.
-// Types: order, cancel, modify, position_sync
+// Types: order, cancel, modify. Automatic position sync is intentionally disabled.
 
 syncer.post('/api/syncer/mirror', async (c) => {
   const user = c.get('user');
@@ -208,8 +235,27 @@ syncer.post('/api/syncer/mirror', async (c) => {
     if (followers.length === 0) {
       return c.json({ error: 'No followers configured.' }, 400);
     }
+    if (!positiveId(config.leader_account_id)
+      || followers.some((follower) => !positiveId(follower.accountId)
+        || typeof follower.multiplier !== 'number' || !Number.isFinite(follower.multiplier) || follower.multiplier <= 0
+        || (follower.connectionId === config.leader_connection_id
+          && follower.accountId === config.leader_account_id))) {
+      return c.json({ error: 'Lider ve takipçi hesap ayarları geçersiz.' }, 400);
+    }
+    const owned = await brokerDb.findByOwnerAndBroker(db, user.id, 'tradovate');
+    const demoIds = new Set(owned.filter((connection) => connection.environment === 'demo').map((connection) => connection.id));
+    if (!config.leader_connection_id || !demoIds.has(config.leader_connection_id)
+      || followers.some((follower) => !demoIds.has(follower.connectionId))) {
+      return c.json({ error: 'Canlı hesaplarda emir kopyalama güvenlik nedeniyle kapalıdır.' }, 403);
+    }
 
     const body = await c.req.json();
+
+    // A browser-held WebSocket event map is not an authoritative position
+    // snapshot. Never create market orders from it.
+    if (body.type === 'position_sync') {
+      return c.json({ error: 'Otomatik pozisyon eşitlemesi güvenlik nedeniyle kapalı.' }, 409);
+    }
 
     // Get fresh tokens for all follower connections
     const connectionIds = new Set<string>();
@@ -226,29 +272,13 @@ syncer.post('/api/syncer/mirror', async (c) => {
     }
 
     // Resolve account specs (account name for placeOrder)
-    const accountSpecMap = new Map<number, string>();
-    for (const [, auth] of tokenMap) {
+    const accountSpecMap = new Map<string, string>();
+    for (const [connId, auth] of tokenMap) {
       try {
         const rawAccounts = (await auth.api.getAccounts(auth.token)) as any[];
-        for (const a of rawAccounts) accountSpecMap.set(a.id, a.name);
+        for (const a of rawAccounts) accountSpecMap.set(`${connId}:${a.id}`, a.name);
       } catch { /* non-fatal */ }
     }
-
-    // Symbol resolver using leader token
-    const symbolCache = new Map<number, string>();
-    const resolveSymbol = async (contractId: number): Promise<string> => {
-      if (body.symbol) return body.symbol;
-      if (symbolCache.has(contractId)) return symbolCache.get(contractId)!;
-      try {
-        const leaderResult = await ensureFreshToken(c.env, config.leader_connection_id!);
-        const contracts = await leaderResult.api.getContractItems(leaderResult.token, [contractId]);
-        const name = contracts.length > 0 ? contracts[0].name : String(contractId);
-        symbolCache.set(contractId, name);
-        return name;
-      } catch {
-        return String(contractId);
-      }
-    };
 
     const actions: Array<{ type: string; followerAccountId: number; detail: string; error?: string }> = [];
 
@@ -257,64 +287,47 @@ syncer.post('/api/syncer/mirror', async (c) => {
       // ORDER: Mirror a new working order to all followers
       // ═════════════════════════════════════════════════════════════════════
       case 'order': {
-        const symbol = await resolveSymbol(body.contractId);
-
-        // If the client didn't provide price fields (WS event may omit them),
-        // fetch full order details from Tradovate REST API as fallback
-        let { price, stopPrice, orderType, orderQty } = body;
-        const needsStop = (orderType === 'Stop' || orderType === 'StopLimit') && stopPrice == null;
-        const needsLimit = (orderType === 'Limit' || orderType === 'StopLimit') && price == null;
-
-        if (needsStop || needsLimit) {
-          try {
-            const leaderResult = await ensureFreshToken(c.env, config.leader_connection_id!);
-            const fullOrder = await leaderResult.api.getOrderItem(leaderResult.token, body.leaderOrderId);
-            if (stopPrice == null) stopPrice = fullOrder.stopPrice ?? fullOrder.triggerPrice;
-            if (price == null) price = fullOrder.price ?? fullOrder.limitPrice;
-            if (!orderQty) orderQty = fullOrder.orderQty ?? fullOrder.qty;
-            // Re-derive orderType from actual data if needed
-            if (!orderType || orderType === 'Market') {
-              if (price != null && stopPrice != null) orderType = 'StopLimit';
-              else if (stopPrice != null) orderType = 'Stop';
-              else if (price != null) orderType = 'Limit';
-            }
-          } catch {
-            // Fall through with what we have
-          }
+        if (!positiveId(body.leaderOrderId) || !positiveId(config.leader_account_id)) {
+          return c.json({ error: 'Geçersiz lider emir veya hesap kimliği.' }, 400);
         }
-
-        // Final validation: skip if required price fields are still missing
-        if ((orderType === 'Stop' || orderType === 'StopLimit') && stopPrice == null) {
-          return c.json({
-            actions: [],
-            error: `Cannot mirror ${orderType} order ${body.leaderOrderId}: stopPrice unavailable`,
-          });
+        const leaderResult = await ensureFreshToken(c.env, config.leader_connection_id!);
+        const fullOrder = await leaderResult.api.getOrderItem(leaderResult.token, body.leaderOrderId);
+        const orderType = fullOrder.ordType;
+        const orderQty = fullOrder.orderQty;
+        const price = fullOrder.price ?? fullOrder.limitPrice;
+        const stopPrice = fullOrder.stopPrice ?? fullOrder.triggerPrice;
+        if (fullOrder.id !== body.leaderOrderId || fullOrder.accountId !== config.leader_account_id
+          || !positiveId(fullOrder.contractId) || !['Buy', 'Sell'].includes(fullOrder.action)
+          || !['Limit', 'Stop', 'StopLimit'].includes(orderType)
+          || !['Working', 'Accepted', 'PendingNew'].includes(fullOrder.ordStatus)
+          || !positiveId(orderQty)
+          || ((orderType === 'Limit' || orderType === 'StopLimit') && !validLimitPrice(price))
+          || ((orderType === 'Stop' || orderType === 'StopLimit') && !validLimitPrice(stopPrice))) {
+          return c.json({ error: 'Lider emri doğrulanamadı; takipçiye emir gönderilmedi.' }, 409);
         }
-        if ((orderType === 'Limit' || orderType === 'StopLimit') && price == null) {
-          return c.json({
-            actions: [],
-            error: `Cannot mirror ${orderType} order ${body.leaderOrderId}: price unavailable`,
-          });
-        }
+        const contracts = await leaderResult.api.getContractItems(leaderResult.token, [fullOrder.contractId]);
+        const symbol = contracts.find((contract) => contract.id === fullOrder.contractId)?.name;
+        if (!symbol) return c.json({ error: 'Sözleşme adı doğrulanamadı; emir gönderilmedi.' }, 409);
 
         for (const follower of followers) {
-          // Dedup: check if we already mirrored this order
-          const existing = await syncerDb.findExistingMirror(
-            db, config.id, body.leaderOrderId, follower.accountId,
-          );
-          if (existing && existing.status !== 'failed') continue;
-
           const followerAuth = tokenMap.get(follower.connectionId);
           if (!followerAuth) continue;
-
-          const accountSpec = accountSpecMap.get(follower.accountId) || String(follower.accountId);
-          const mirroredQty = Math.max(1, Math.floor(Number(orderQty || 1) * Number(follower.multiplier || 1)));
+          const accountSpec = accountSpecMap.get(`${follower.connectionId}:${follower.accountId}`);
+          const mirroredQty = mirroredQuantity(orderQty, follower.multiplier);
+          if (!accountSpec || !positiveId(follower.accountId) || mirroredQty === null) {
+            actions.push({ type: 'order', followerAccountId: follower.accountId,
+              detail: 'Takipçi hesap veya miktar doğrulanamadı; emir gönderilmedi.', error: 'invalid_order' });
+            continue;
+          }
+          // The unique DB reservation is atomic across duplicate requests.
+          // Never automatically retry failed or uncertain broker calls.
+          if (!syncerDb.claimMirrorOrder(db, config.id, body.leaderOrderId, follower.accountId)) continue;
 
           try {
             const orderParams: any = {
               accountSpec,
               accountId: follower.accountId,
-              action: body.action,
+              action: fullOrder.action,
               symbol,
               orderQty: mirroredQty,
               orderType,
@@ -324,13 +337,14 @@ syncer.post('/api/syncer/mirror', async (c) => {
             if (stopPrice != null) orderParams.stopPrice = stopPrice;
 
             const result = await followerAuth.api.placeOrder(followerAuth.token, orderParams);
+            if (!positiveId(result.id)) throw new Error('Broker emir kimliği doğrulanamadı. Durum elle uzlaştırılmalı.');
 
             await syncerDb.logOrder(db, {
               config_id: config.id,
               leader_order_id: body.leaderOrderId,
-              leader_action: body.action,
+              leader_action: fullOrder.action,
               leader_symbol: symbol,
-              leader_qty: Number(orderQty || 1),
+              leader_qty: orderQty,
               follower_account_id: follower.accountId,
               follower_order_id: result.id,
               follower_qty: mirroredQty,
@@ -341,26 +355,26 @@ syncer.post('/api/syncer/mirror', async (c) => {
             actions.push({
               type: 'order',
               followerAccountId: follower.accountId,
-              detail: `${orderType} ${body.action} ${mirroredQty} ${symbol}`,
+              detail: `${orderType} ${fullOrder.action} ${mirroredQty} ${symbol}`,
             });
           } catch (err: any) {
             await syncerDb.logOrder(db, {
               config_id: config.id,
               leader_order_id: body.leaderOrderId,
-              leader_action: body.action,
+              leader_action: fullOrder.action,
               leader_symbol: symbol,
-              leader_qty: Number(orderQty || 1),
+              leader_qty: orderQty,
               follower_account_id: follower.accountId,
               follower_qty: mirroredQty,
               order_type: orderType,
-              status: 'failed',
+              status: 'uncertain',
               error_message: err.message,
             });
 
             actions.push({
               type: 'order',
               followerAccountId: follower.accountId,
-              detail: `${orderType} ${body.action} ${symbol}`,
+              detail: `${orderType} ${fullOrder.action} ${symbol}`,
               error: err.message,
             });
           }
@@ -414,6 +428,12 @@ syncer.post('/api/syncer/mirror', async (c) => {
       // MODIFY: Modify follower orders matching a leader order
       // ═════════════════════════════════════════════════════════════════════
       case 'modify': {
+        if (!positiveId(body.leaderOrderId)) return c.json({ error: 'Geçersiz lider emir kimliği.' }, 400);
+        if ((body.price != null && !validLimitPrice(body.price))
+          || (body.stopPrice != null && !validLimitPrice(body.stopPrice))
+          || (body.orderQty != null && !positiveId(body.orderQty))) {
+          return c.json({ error: 'Geçersiz emir fiyatı veya miktarı; değişiklik gönderilmedi.' }, 400);
+        }
         const followerOrders = await syncerDb.findFollowerOrders(
           db, config.id, body.leaderOrderId,
         );
@@ -429,8 +449,15 @@ syncer.post('/api/syncer/mirror', async (c) => {
           if (body.price != null) modifyParams.price = body.price;
           if (body.stopPrice != null) modifyParams.stopPrice = body.stopPrice;
           if (body.orderQty != null) {
-            modifyParams.orderQty = Math.max(1, Math.floor(Number(body.orderQty) * Number(follower.multiplier || 1)));
+            const qty = mirroredQuantity(body.orderQty, follower.multiplier);
+            if (qty === null) {
+              actions.push({ type: 'modify', followerAccountId: follower.accountId,
+                detail: 'Geçersiz takipçi miktarı; değişiklik gönderilmedi.', error: 'invalid_order' });
+              continue;
+            }
+            modifyParams.orderQty = qty;
           }
+          if (Object.keys(modifyParams).length === 0) continue;
 
           try {
             await followerAuth.api.modifyOrder(followerAuth.token, log.follower_order_id, modifyParams);
@@ -447,73 +474,6 @@ syncer.post('/api/syncer/mirror', async (c) => {
               detail: `Modify failed for order ${log.follower_order_id}`,
               error: err.message,
             });
-          }
-        }
-        break;
-      }
-
-      // ═════════════════════════════════════════════════════════════════════
-      // POSITION_SYNC: Ensure followers match leader positions * multiplier
-      // ═════════════════════════════════════════════════════════════════════
-      case 'position_sync': {
-        // body.positions: [{ contractId, netPos }]
-        const leaderPosMap = new Map<number, number>();
-        for (const p of (body.positions || [])) {
-          leaderPosMap.set(p.contractId, p.netPos);
-        }
-
-        for (const follower of followers) {
-          const followerAuth = tokenMap.get(follower.connectionId);
-          if (!followerAuth) continue;
-
-          const followerPositions = await followerAuth.api.getPositionsByAccount(
-            followerAuth.token, follower.accountId,
-          );
-
-          const followerPosMap = new Map<number, number>();
-          for (const p of followerPositions) {
-            followerPosMap.set(p.contractId, p.netPos);
-          }
-
-          const allContractIds = new Set([...leaderPosMap.keys(), ...followerPosMap.keys()]);
-
-          for (const contractId of allContractIds) {
-            const leaderPos = leaderPosMap.get(contractId) || 0;
-            const targetPos = Math.round(leaderPos * Number(follower.multiplier || 1));
-            const followerPos = followerPosMap.get(contractId) || 0;
-            const delta = targetPos - followerPos;
-
-            if (delta === 0) continue;
-
-            const symbol = await resolveSymbol(contractId);
-            const accountSpec = accountSpecMap.get(follower.accountId) || String(follower.accountId);
-            const action = delta > 0 ? 'Buy' : 'Sell';
-            const qty = Math.abs(delta);
-
-            try {
-              await followerAuth.api.placeOrder(followerAuth.token, {
-                accountSpec,
-                accountId: follower.accountId,
-                action: action as 'Buy' | 'Sell',
-                symbol,
-                orderQty: qty,
-                orderType: 'Market',
-                isAutomated: true,
-              });
-
-              actions.push({
-                type: 'position',
-                followerAccountId: follower.accountId,
-                detail: `Market ${action} ${qty} ${symbol} (pos: ${followerPos} -> ${targetPos})`,
-              });
-            } catch (err: any) {
-              actions.push({
-                type: 'position',
-                followerAccountId: follower.accountId,
-                detail: `Market ${action} ${qty} ${symbol}`,
-                error: err.message,
-              });
-            }
           }
         }
         break;

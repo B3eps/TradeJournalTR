@@ -16,11 +16,13 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
+const crypto = require('crypto');
 const Module = require('module');
+const { waitForServer } = require('./boot-health');
 
 const PORT = 8471;
 const START_HIDDEN = process.argv.includes('--hidden');
+const BOOT_TOKEN = crypto.randomBytes(32).toString('hex');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -50,34 +52,20 @@ function isAppUrl(url) {
   } catch (e) { return false; }
 }
 
-function waitForServer(url, timeoutMs) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const tryOnce = () => {
-      const req = http.get(url, (res) => {
-        res.resume();
-        resolve();
-      });
-      req.on('error', () => {
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error('Sunucu zamanında başlamadı'));
-        } else {
-          setTimeout(tryOnce, 300);
-        }
-      });
-    };
-    tryOnce();
-  });
-}
-
 function isValidUpdateDir(dir) {
   try {
-    return (
-      fs.existsSync(path.join(dir, 'server.cjs')) &&
-      fs.existsSync(path.join(dir, 'schema.sql')) &&
-      fs.existsSync(path.join(dir, 'public', 'trades.html')) &&
-      fs.existsSync(path.join(dir, 'version.json'))
-    );
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8'));
+    if (manifest.format !== 2 || !manifest.files || typeof manifest.files !== 'object') return false;
+    const required = ['server.cjs', 'schema.sql', 'public/trades.html', 'public/assets/appBundle.js', 'public/assets/app.css'];
+    if (required.some((name) => !Object.hasOwn(manifest.files, name))) return false;
+    const root = path.resolve(dir) + path.sep;
+    return Object.entries(manifest.files).every(([relative, expectedHash]) => {
+      if (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/i.test(expectedHash)) return false;
+      const file = path.resolve(dir, relative.replaceAll('/', path.sep));
+      if (!file.startsWith(root) || !fs.statSync(file).isFile()) return false;
+      const actualHash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      return actualHash.toLowerCase() === expectedHash.toLowerCase();
+    });
   } catch (e) {
     return false;
   }
@@ -252,6 +240,7 @@ function startServer() {
   const updateDir = path.join(app.getPath('userData'), 'app');
   process.env.DATA_DIR = path.join(app.getPath('userData'), 'data');
   process.env.PORT = String(PORT);
+  process.env.TRADE_GUNLUGU_BOOT_TOKEN = BOOT_TOKEN;
   iconPath = path.join(bundledRoot, 'public', 'assets', 'img', 'favicon.png');
 
   // better-sqlite3 exe içindedir; dışarıdan yüklenen server.cjs onu buradan bulur.
@@ -279,7 +268,7 @@ function startServer() {
 app.whenReady().then(async () => {
   try {
     startServer();
-    await waitForServer(`http://127.0.0.1:${PORT}/`, 20000);
+    await waitForServer(`http://127.0.0.1:${PORT}/api/health`, BOOT_TOKEN, 20000);
     registerShortcuts(); // tepsi menüsü etiketleri gerçek kısayolu göstersin diye önce kaydedilir
     buildTray();
     createWindow(START_HIDDEN);

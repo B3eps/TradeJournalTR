@@ -1,4 +1,4 @@
-// Yedekleme: elle / otomatik günlük veritabanı yedeği, listeleme ve geri yükleme adımları.
+// Yedekleme: veritabanı, ekran görüntüleri ve haber değerlendirmeleri; anahtar ayrı korunur.
 const React = require('react');
 const { useState, useEffect, useCallback } = React;
 const { motion, AnimatePresence } = require('framer-motion');
@@ -98,7 +98,7 @@ const BackupSection = () => {
             checked={draft.autoEnabled}
             onChange={(v) => setDraft((d) => ({ ...d, autoEnabled: v }))}
             label="Otomatik günlük yedek"
-            description="Her gün belirlenen saatte (uygulama kapalıysa o gün ilk açılışta) veritabanının tutarlı bir kopyası alınır."
+            description="Her gün belirlenen saatte (uygulama kapalıysa o gün ilk açılışta) veritabanı, ekran görüntüleri ve haber değerlendirmeleri yedeklenir."
           />
           <div className="grid grid-cols-2 gap-4 max-w-sm">
             <Field label="Saat">
@@ -110,9 +110,9 @@ const BackupSection = () => {
           </div>
 
           <Banner tone="info">
-            Yedek yalnızca veritabanını (.db) ve küçük bir manifest dosyasını içerir. Ekran görüntüleri klasörü ve
-            şifreleme anahtarı (secret.key) <b>dahil edilmez</b>: anahtar paylaşılabilecek bir klasöre asla kopyalanmaz.
-            Bu yüzden kayıtlı bağlantı anahtarları (broker, ntfy) yalnızca aynı bilgisayardaki data klasörüyle çözülebilir.
+            Yeni yedekler veritabanını, ekran görüntülerini ve haber değerlendirmelerini içerir. Şifreleme anahtarı (secret.key) <b>dahil edilmez</b>:
+            yedek klasörü paylaşılırsa anahtar açığa çıkmamalıdır. Bu yedek aynı anahtarla geri yüklenir.
+            Başka bilgisayara taşınırken uygulama kapalıyken data klasörünün tamamını, anahtarı koruyarak ayrıca kopyalayın.
           </Banner>
 
           <div className="rounded-xl border border-border overflow-hidden">
@@ -142,7 +142,11 @@ const BackupSection = () => {
                           {fmtDateTime(b.createdAt)} · {fmtBytes(b.sizeBytes)}{b.auto ? ' · otomatik' : ''}
                           {b.counts && typeof b.counts.tasks === 'number' ? ` · ${b.counts.tasks} görev` : ''}
                           {b.counts && typeof b.counts.trades === 'number' ? ` · ${b.counts.trades} işlem` : ''}
+                          {typeof b.screenshotCount === 'number' ? ` · ${b.screenshotCount} görsel` : ' · eski DB yedeği'}
+                          {typeof b.evaluationCount === 'number' ? ` · ${b.evaluationCount} haber değerlendirmesi` : ''}
+                          {b.keyMatches === null ? ' · anahtar doğrulanamıyor' : ''}
                         </div>
+                        {b.keyMatches === false && <div className="text-[11px] text-negative">Şifreleme anahtarı bu yedekle uyuşmuyor.</div>}
                       </div>
                       {confirmDel === b.name ? (
                         <div className="flex items-center gap-1">
@@ -184,9 +188,13 @@ const BackupSection = () => {
             )}
             <Steps items={[
               'Uygulamayı tamamen kapatın (sistem tepsisinden de çıkın).',
-              `Data klasöründeki mevcut ${data ? data.dbFile : '.db'} dosyasını güvenli bir yere taşıyın (yanındaki -wal / -shm dosyalarıyla birlikte).`,
+              'İşleme başlamadan önce mevcut data klasörünün tamamını güvenli bir yere kopyalayın.',
+              `Data klasöründeki mevcut ${data ? data.dbFile : '.db'} dosyasını ve yanındaki -wal / -shm dosyalarını ayrı bir yere taşıyın.`,
               `Geri dönmek istediğiniz yedek klasöründeki ${data ? data.dbFile : '.db'} dosyasını data klasörüne kopyalayın${data ? ` (ör. …${sep}${data.dbFile})` : ''}.`,
-              'Uygulamayı yeniden açın. secret.key dosyasına dokunmayın; o data klasöründe kalmalı.',
+              'Yedekte screenshots klasörü varsa içindeki görselleri data/screenshots klasörüne kopyalayın. Mevcut görselleri silmeyin.',
+              'Yedekte news-eval klasörü varsa içindeki haber değerlendirmelerini data/news-eval klasörüne kopyalayın. Mevcut dosyaları silmeyin.',
+              'secret.key dosyası aynı data klasöründe kalmalı. Anahtar uyuşmuyor uyarısı varsa şifreli bağlantılar çözülemez; eski yedeği zorlamayın.',
+              'Uygulamayı yeniden açıp işlemleri ve ekran görüntülerini kontrol edin.',
             ]} />
           </div>
 

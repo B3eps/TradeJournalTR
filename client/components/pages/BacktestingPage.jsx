@@ -4,11 +4,22 @@ const React = require('react');
 const { useState, useEffect } = React;
 const Icons = require('../shared/Icons');
 
+const request = async (url, options) => {
+  const response = await authFetch(url, options);
+  if (!response.ok) {
+    let detail = '';
+    try { detail = (await response.json()).error || ''; } catch (err) { /* response may not be JSON */ }
+    throw new Error(`İşlem tamamlanamadı (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`);
+  }
+  return response;
+};
+
 const BacktestingPage = () => {
   const [sessions, setSessions] = useState([]);
   const [activeTrades, setActiveTrades] = useState([]);
   const [allTrades, setAllTrades] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [statsFilter, setStatsFilter] = useState('all'); // 'all' | session id
   const [showStartForm, setShowStartForm] = useState(false);
   const [showEndForm, setShowEndForm] = useState(false);
@@ -33,15 +44,17 @@ const BacktestingPage = () => {
     if (showSpinner) setLoading(true);
     try {
       const [sessRes, tradesRes] = await Promise.all([
-        authFetch('/api/backtesting/sessions'),
-        authFetch('/api/backtesting/trades'),
+        request('/api/backtesting/sessions'),
+        request('/api/backtesting/trades'),
       ]);
       const sessData = await sessRes.json();
       const tradesData = await tradesRes.json();
       setSessions(sessData.sessions || []);
       setAllTrades(tradesData.trades || []);
+      setError('');
     } catch (err) {
       console.error('Failed to load sessions', err);
+      setError(err.message);
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -49,11 +62,13 @@ const BacktestingPage = () => {
 
   const loadActiveTrades = async (sessionId) => {
     try {
-      const res = await authFetch(`/api/backtesting/sessions/${sessionId}/trades`);
+      const res = await request(`/api/backtesting/sessions/${sessionId}/trades`);
       const data = await res.json();
       setActiveTrades(data.trades || []);
+      setError('');
     } catch (err) {
       console.error('Failed to load active trades', err);
+      setError(err.message);
     }
   };
 
@@ -67,8 +82,9 @@ const BacktestingPage = () => {
   const handleStartSession = async (e) => {
     e.preventDefault();
     if (!newTicker.trim()) return;
+    setError('');
     try {
-      await authFetch('/api/backtesting/sessions', {
+      await request('/api/backtesting/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName.trim() || undefined, ticker: newTicker.trim(), startDate: newStartDate }),
@@ -78,14 +94,16 @@ const BacktestingPage = () => {
       await load(false);
     } catch (err) {
       console.error('Failed to start session', err);
+      setError(err.message);
     }
   };
 
   const handleEndSession = async (e) => {
     e.preventDefault();
     if (!activeSession) return;
+    setError('');
     try {
-      await authFetch(`/api/backtesting/sessions/${activeSession._id}/end`, {
+      await request(`/api/backtesting/sessions/${activeSession._id}/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endDate }),
@@ -95,25 +113,30 @@ const BacktestingPage = () => {
       await load(false);
     } catch (err) {
       console.error('Failed to end session', err);
+      setError(err.message);
     }
   };
 
   const handleContinueSession = async (sessionId) => {
+    setError('');
     try {
-      await authFetch(`/api/backtesting/sessions/${sessionId}/continue`, { method: 'POST' });
+      await request(`/api/backtesting/sessions/${sessionId}/continue`, { method: 'POST' });
       await load(false);
     } catch (err) {
       console.error('Failed to continue session', err);
+      setError(err.message);
     }
   };
 
   const handleDeleteSession = async (sessionId) => {
     if (!window.confirm('Bu oturum ve tüm işlemleri silinsin mi?')) return;
+    setError('');
     try {
-      await authFetch(`/api/backtesting/sessions/${sessionId}`, { method: 'DELETE' });
+      await request(`/api/backtesting/sessions/${sessionId}`, { method: 'DELETE' });
       await load(false);
     } catch (err) {
       console.error('Failed to delete session', err);
+      setError(err.message);
     }
   };
 
@@ -127,9 +150,10 @@ const BacktestingPage = () => {
   const handleAddTrade = async (e) => {
     e.preventDefault();
     if (!activeSession || !tradePF || !tradeTime) return;
+    setError('');
     setTradeSubmitting(true);
     try {
-      await authFetch('/api/backtesting/trades', {
+      await request('/api/backtesting/trades', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -144,18 +168,21 @@ const BacktestingPage = () => {
       await load(false);
     } catch (err) {
       console.error('Failed to add trade', err);
+      setError(err.message);
     } finally {
       setTradeSubmitting(false);
     }
   };
 
   const handleDeleteTrade = async (tradeId) => {
+    setError('');
     try {
-      await authFetch(`/api/backtesting/trades/${tradeId}`, { method: 'DELETE' });
+      await request(`/api/backtesting/trades/${tradeId}`, { method: 'DELETE' });
       await loadActiveTrades(activeSession._id);
       await load(false);
     } catch (err) {
       console.error('Failed to delete trade', err);
+      setError(err.message);
     }
   };
 
@@ -237,17 +264,23 @@ const BacktestingPage = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-text-muted text-sm">
-        Geriye dönük test verileri yükleniyor...
+        Test günlüğü verileri yükleniyor...
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div role="alert" className="rounded-lg border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative flex items-start justify-between gap-3">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError('')} aria-label="Hatayı kapat">×</button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-text-primary text-2xl font-bold">Geriye Dönük Test</h1>
-          <p className="text-text-muted text-sm mt-1">Geriye dönük test oturumlarındaki kazanç ve kayıpları takip edin</p>
+          <h1 className="text-text-primary text-2xl font-bold">Test Günlüğü</h1>
+          <p className="text-text-muted text-sm mt-1">Stratejileri manuel test ederken oturum ve işlem sonuçlarını kaydedin</p>
         </div>
         {!activeSession && !showStartForm && (
           <button className={btnPrimary} onClick={() => setShowStartForm(true)}>
@@ -539,7 +572,7 @@ const BacktestingPage = () => {
         {sessions.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <Icons.FlaskConical className="w-10 h-10 text-text-muted mx-auto mb-3" />
-            <p className="text-text-muted text-sm">Henüz oturum yok. İlk geriye dönük test oturumunuzu başlatın.</p>
+            <p className="text-text-muted text-sm">Henüz test oturumu yok. İlk oturumunuzu başlatın.</p>
             <button className={`${btnPrimary} mt-4`} onClick={() => setShowStartForm(true)}>+ Oturum Başlat</button>
           </div>
         ) : (

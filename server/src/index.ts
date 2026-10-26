@@ -61,7 +61,7 @@ app.use('/api/*', async (c, next) => {
 app.use('*', authMiddleware);
 
 // Health check
-app.get('/api/health', (c) => c.json({ status: 'ok' }));
+app.get('/api/health', (c) => c.json({ status: 'ok', bootToken: process.env.TRADE_GUNLUGU_BOOT_TOKEN || null }));
 
 // API routes (must be before page routes to take precedence)
 app.route('/', uploadRoutes);
