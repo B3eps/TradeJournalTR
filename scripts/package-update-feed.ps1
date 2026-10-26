@@ -27,7 +27,14 @@ Copy-Item -Path (Join-Path $source 'public\*') -Destination (Join-Path $stage 'p
 $hashes = [ordered]@{}
 foreach ($file in (Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName)) {
   $relative = $file.FullName.Substring($stage.Length + 1).Replace('\', '/')
-  $hashes[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  $bytes = [IO.File]::ReadAllBytes($file.FullName)
+  if ($file.Extension -match '^\.(js|css|html|sql|json|txt|svg|xml)$') {
+    $text = [Text.Encoding]::UTF8.GetString($bytes).Replace("`r`n", "`n")
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($text)
+  }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $hashes[$relative] = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
 }
 $version = Get-Date -Format 'yyyy.MM.dd-HHmmss'
 $manifest = [ordered]@{ version = $version; format = 2; files = $hashes }

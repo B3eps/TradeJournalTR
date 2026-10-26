@@ -27,10 +27,16 @@ function digest(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
+function cacheBusted(url) {
+  const target = new URL(url);
+  target.searchParams.set('update-check', `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+  return target.href;
+}
+
 async function stageRemoteUpdate({ manifestUrl, updateRoot }) {
   const feed = new URL(manifestUrl);
   if (feed.protocol !== 'https:') throw new Error('Güncelleme adresi HTTPS olmalı.');
-  const manifestBytes = await fetchBytes(feed.href, 1024 * 1024);
+  const manifestBytes = await fetchBytes(cacheBusted(feed.href), 1024 * 1024);
   const manifest = JSON.parse(manifestBytes.toString('utf8'));
   if (manifest.format !== 2 || typeof manifest.version !== 'string' ||
       !/^\d{4}\.\d{2}\.\d{2}-\d{6}$/.test(manifest.version) ||
@@ -63,7 +69,7 @@ async function stageRemoteUpdate({ manifestUrl, updateRoot }) {
       }
       const url = new URL(relative.split('/').map(encodeURIComponent).join('/'), baseUrl);
       if (url.protocol !== 'https:' || url.origin !== feed.origin) throw new Error('Güncelleme dosyası farklı adresten indirilemez.');
-      const bytes = await fetchBytes(url.href, MAX_FILE_BYTES);
+      const bytes = await fetchBytes(cacheBusted(url.href), MAX_FILE_BYTES);
       totalBytes += bytes.length;
       if (totalBytes > MAX_TOTAL_BYTES) throw new Error('Toplam güncelleme boyutu sınırı aşıldı.');
       if (digest(bytes).toLowerCase() !== expectedHash.toLowerCase()) throw new Error(`SHA-256 doğrulaması başarısız: ${relative}`);
