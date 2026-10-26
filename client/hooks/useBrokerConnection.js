@@ -43,8 +43,10 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         ? `${apiBase}/status?broker=${brokerType}`
         : `${apiBase}/status`;
       const response = await authFetch(statusUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      setConnections(data.connections || []);
+      if (!Array.isArray(data.connections)) throw new Error('Invalid connection status response');
+      setConnections(data.connections);
       setConnectionsUsed(data.connectionsUsed || 0);
       setConnectionLimit(data.connectionLimit || 0);
       setCanUseBrokerSync(data.canUseBrokerSync || false);
@@ -65,8 +67,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
           body: JSON.stringify(creds),
         });
         const data = await response.json();
-        if (data.error) {
-          setMessage?.({ type: 'error', text: data.error });
+        if (!response.ok || data.error) {
+          setMessage?.({ type: 'error', text: data.error || `${label} bağlantısı kurulamadı.` });
         } else {
           setMessage?.({ type: 'success', text: `${label} bağlantısı kuruldu.` });
           setCredentials({ email: '', password: '' });
@@ -84,11 +86,14 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
           body: JSON.stringify(body),
         });
         const data = await response.json();
-        if (data.error) {
-          setMessage?.({ type: 'error', text: data.error });
+        if (!response.ok || data.error) {
+          setMessage?.({ type: 'error', text: data.error || `${label} bağlantısı başlatılamadı.` });
           setConnecting(false);
         } else if (data.authUrl) {
           window.location.href = data.authUrl;
+        } else {
+          setMessage?.({ type: 'error', text: `${label} için yetkilendirme adresi alınamadı.` });
+          setConnecting(false);
         }
       }
     } catch (err) {
@@ -107,8 +112,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         body: JSON.stringify({ connectionId }),
       });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'Senkronizasyon başarısız oldu.' });
       } else {
         setMessage?.({ type: 'success', text: data.message || 'Senkronizasyon tamamlandı.' });
         fetchStatus();
@@ -131,8 +136,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         body: JSON.stringify({ broker: brokerType }),
       });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'Tüm bağlantılar senkronize edilemedi.' });
       } else {
         const results = data.results || [];
         const total = results.reduce((sum, r) => sum + (r.tradesImported || 0), 0);
@@ -157,8 +162,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
     try {
       const response = await authFetch(`${apiBase}/connections/${connectionId}`, { method: 'DELETE' });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'Bağlantı kesilemedi.' });
       } else {
         setMessage?.({ type: 'success', text: 'Bağlantı kaldırıldı.' });
         fetchStatus();
@@ -174,9 +179,11 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
     try {
       const body = { connectionId };
       if (todayOnly) {
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         body.startDate = today;
         body.endDate = today;
+        body.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       }
       const response = await authFetch(`${apiBase}/sync`, {
         method: 'POST',
@@ -184,8 +191,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         body: JSON.stringify(body),
       });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'İçe aktarma başarısız oldu.' });
       } else {
         setMessage?.({ type: 'success', text: data.message || 'İçe aktarma tamamlandı.' });
         setShowImportPrompt(null);
@@ -234,8 +241,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         body: JSON.stringify({ connectionId, selectedAccounts: toSave }),
       });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'Hesap ayarları güncellenemedi.' });
       } else {
         setConnections(prev => prev.map(c =>
           c.connectionId === connectionId ? { ...c, selectedAccounts: toSave, accountsDisabled: toSave.length === 0 } : c
@@ -258,8 +265,8 @@ const useBrokerConnection = (brokerType, { onSyncComplete, setMessage, setExpand
         body: JSON.stringify({ connectionId, isEval }),
       });
       const data = await response.json();
-      if (data.error) {
-        setMessage?.({ type: 'error', text: data.error });
+      if (!response.ok || data.error) {
+        setMessage?.({ type: 'error', text: data.error || 'Değerlendirme hesabı ayarı güncellenemedi.' });
       } else {
         setConnections(prev => prev.map(c =>
           c.connectionId === connectionId ? { ...c, isEval } : c

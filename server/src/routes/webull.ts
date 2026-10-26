@@ -52,7 +52,7 @@ async function ensureFreshToken(
   // Token is within the renewal window (or already expired) — attempt refresh
   if (!encryptedRefreshToken || !env.WEBULL_APP_ID || !env.WEBULL_APP_SECRET) {
     if (expiresAtMs > now) return token;
-    throw new Error('Webull session expired. Please reconnect your account.');
+    throw new Error('Webull oturumunun süresi doldu. Lütfen hesabınızı yeniden bağlayın.');
   }
 
   try {
@@ -75,7 +75,7 @@ async function ensureFreshToken(
   } catch {
     // If refresh fails but token hasn't fully expired yet, use the existing one
     if (expiresAtMs > now) return token;
-    throw new Error('Webull session expired and refresh failed. Please reconnect your account.');
+    throw new Error('Webull oturumunun süresi doldu ve yenileme başarısız oldu. Lütfen hesabınızı yeniden bağlayın.');
   }
 }
 
@@ -248,7 +248,7 @@ webull.post('/api/webull/exchange', requiresLogin, async (c) => {
     } catch {
       // cleanup is best-effort
     }
-    return c.json({ error: `Failed to connect: ${err.message}` }, 400);
+    return c.json({ error: `Bağlantı başarısız: ${err.message}` }, 400);
   }
 });
 
@@ -437,12 +437,12 @@ webull.post(
         last_sync_time: new Date().toISOString(),
       });
 
-      return c.json({ message: `Synced ${syncedCount} new trades`, synced: syncedCount });
+      return c.json({ message: `${syncedCount} yeni işlem eşitlendi.`, synced: syncedCount });
     } catch (err: any) {
-      if (err.message.includes('expired')) {
+      if (err.message.includes('expired') || err.message.includes('süresi doldu')) {
         return c.json({ error: err.message, expired: true }, 401);
       }
-      return c.json({ error: `Sync failed: ${err.message}` }, 500);
+      return c.json({ error: `Eşitleme başarısız: ${err.message}` }, 500);
     }
   },
 );
@@ -463,7 +463,7 @@ webull.delete(
       await brokerDb.deleteById(serviceClient, connectionId, user.id);
       return c.json({ message: 'Bağlantı silindi.' });
     } catch (err: any) {
-      return c.json({ error: `Failed to delete connection: ${err.message}` }, 500);
+      return c.json({ error: `Bağlantı silinemedi: ${err.message}` }, 500);
     }
   },
 );

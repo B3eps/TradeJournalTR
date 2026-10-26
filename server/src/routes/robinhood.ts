@@ -36,7 +36,7 @@ async function ensureFreshToken(
 
   if (!encryptedRefreshToken) {
     if (expiresAtMs > now) return token;
-    throw new Error('Robinhood session expired. Please reconnect your account.');
+    throw new Error('Robinhood oturumunun süresi doldu. Lütfen hesabınızı yeniden bağlayın.');
   }
 
   try {
@@ -52,7 +52,7 @@ async function ensureFreshToken(
     return result.accessToken;
   } catch {
     if (expiresAtMs > now) return token;
-    throw new Error('Robinhood session expired and refresh failed. Please reconnect your account.');
+    throw new Error('Robinhood oturumunun süresi doldu ve yenileme başarısız oldu. Lütfen hesabınızı yeniden bağlayın.');
   }
 }
 
@@ -67,7 +67,7 @@ robinhood.post(
     const { email, password } = body as { email?: string; password?: string };
 
     if (!email || !password) {
-      return c.json({ error: 'Email and password are required' }, 400);
+      return c.json({ error: 'E-posta ve parola gereklidir.' }, 400);
     }
 
     const serviceClient = getDb();
@@ -105,10 +105,10 @@ robinhood.post(
         device_token: await encrypt(deviceToken, c.env.ENCRYPTION_KEY),
       });
 
-      return c.json({ message: 'Connected successfully', connectionId, accounts });
+      return c.json({ message: 'Başarıyla bağlandı.', connectionId, accounts });
     } catch (err: any) {
       console.error('Robinhood connect error:', err.message);
-      return c.json({ error: `Failed to connect: ${err.message}` }, 400);
+      return c.json({ error: `Bağlantı başarısız: ${err.message}` }, 400);
     }
   },
 );
@@ -195,7 +195,7 @@ robinhood.post(
     const { connectionId } = body as { connectionId?: string };
 
     if (!connectionId) {
-      return c.json({ error: 'Missing connectionId' }, 400);
+      return c.json({ error: 'Bağlantı kimliği eksik.' }, 400);
     }
 
     try {
@@ -204,12 +204,12 @@ robinhood.post(
       // Load connection data
       const brokerConn = await brokerDb.findById(serviceClient, connectionId);
       if (!brokerConn || brokerConn.owner !== user.id) {
-        return c.json({ error: 'Connection not found' }, 404);
+        return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
       }
 
       const rhConn = await rhConnDb.findByBrokerConnectionId(serviceClient, connectionId);
       if (!rhConn || !rhConn.access_token) {
-        return c.json({ error: 'Robinhood not connected for this connection' }, 400);
+        return c.json({ error: 'Bu bağlantı için Robinhood hesabı bağlı değil.' }, 400);
       }
 
       // Ensure fresh token
@@ -324,10 +324,10 @@ robinhood.post(
         last_sync_time: new Date().toISOString(),
       });
 
-      return c.json({ message: `Synced ${result.imported} new trades`, synced: result.imported });
+      return c.json({ message: `${result.imported} yeni işlem eşitlendi.`, synced: result.imported });
     } catch (err: any) {
       console.error('Robinhood sync error:', err.message);
-      return c.json({ error: `Sync failed: ${err.message}` }, 500);
+      return c.json({ error: `Eşitleme başarısız: ${err.message}` }, 500);
     }
   },
 );
@@ -344,9 +344,9 @@ robinhood.delete(
 
     try {
       await brokerDb.deleteById(serviceClient, connectionId, user.id);
-      return c.json({ message: 'Connection deleted' });
+      return c.json({ message: 'Bağlantı silindi.' });
     } catch (err: any) {
-      return c.json({ error: `Failed to delete connection: ${err.message}` }, 500);
+      return c.json({ error: `Bağlantı silinemedi: ${err.message}` }, 500);
     }
   },
 );

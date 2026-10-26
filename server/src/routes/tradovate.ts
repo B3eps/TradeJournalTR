@@ -81,7 +81,7 @@ async function ensureFreshToken(
     if (expiresAtMs > now) {
       return token;
     }
-    throw new Error('Tradovate session expired and renewal failed. Please reconnect your account.');
+    throw new Error('Tradovate oturumunun süresi doldu ve yenileme başarısız oldu. Lütfen hesabınızı yeniden bağlayın.');
   }
 }
 
@@ -113,7 +113,7 @@ async function syncConnection(
   db: Db,
   userId: string,
   connectionId: string,
-  options?: { accountIds?: number[]; startDate?: string; endDate?: string },
+  options?: { accountIds?: number[]; startDate?: string; endDate?: string; timeZone?: string },
 ): Promise<number> {
   const serviceClient = getDb();
 
@@ -125,7 +125,7 @@ async function syncConnection(
 
   const tvConn = await tvConnDb.findByBrokerConnectionId(serviceClient, connectionId);
   if (!tvConn || !tvConn.access_token) {
-    throw new Error('Tradovate not connected for this connection');
+    throw new Error('Bu bağlantı için Tradovate hesabı bağlı değil.');
   }
 
   if (tvConn.accounts_disabled && !(options?.accountIds && options.accountIds.length > 0)) {
@@ -331,14 +331,54 @@ async function syncConnection(
 
   // Step 6: Apply optional date range filter on entry time
   let filteredTrips = mergedTrips;
-  const { startDate, endDate } = options || {};
+  const { startDate, endDate, timeZone } = options || {};
   if (startDate || endDate) {
-    const start = startDate ? new Date(startDate + 'T00:00:00.000Z') : null;
-    const end = endDate ? new Date(endDate + 'T23:59:59.999Z') : null;
-    filteredTrips = roundTrips.filter((t) => {
+    const zone = timeZone || 'UTC';
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const isValidDate = (value?: string) => {
+      if (!value) return true;
+      if (!datePattern.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00.000Z`);
+      return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    const isValidTimeZone = (value: string) => {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!isValidDate(startDate) || !isValidDate(endDate) || !isValidTimeZone(zone)) {
+      throw new Error('Invalid date range');
+    }
+    // Convert a local midnight in the requested IANA zone into its UTC instant.
+    // Iteration handles offsets and DST transitions without assuming a fixed offset.
+    const localMidnightToUtc = (date: string): Date => {
+      const [year, month, day] = date.split('-').map(Number);
+      const target = Date.UTC(year, month - 1, day);
+      let instant = target;
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hourCycle: 'h23',
+      });
+      for (let i = 0; i < 3; i += 1) {
+        const parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(p => [p.type, p.value]));
+        const represented = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+        instant += target - represented;
+      }
+      return new Date(instant);
+    };
+    const start = startDate ? localMidnightToUtc(startDate) : null;
+    const endExclusive = endDate
+      ? localMidnightToUtc(new Date(Date.parse(`${endDate}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10))
+      : null;
+    filteredTrips = mergedTrips.filter((t) => {
       const entryTime = new Date(t.enterTime);
       if (start && entryTime < start) return false;
-      if (end && entryTime > end) return false;
+      if (endExclusive && entryTime >= endExclusive) return false;
       return true;
     });
   }
@@ -625,7 +665,7 @@ tradovate.post('/api/tradovate/exchange', requiresLogin, async (c) => {
     }
 
     const brokerLabel = BROKER_LABELS[brokerConn.broker] || 'Tradovate';
-    return c.json({ message: `${brokerLabel} connected successfully`, accounts, connectionId, broker: brokerConn.broker });
+    return c.json({ message: `${brokerLabel} bağlantısı kuruldu.`, accounts, connectionId, broker: brokerConn.broker });
   } catch (err: any) {
     // Clean up the pending connection on failure
     try {
@@ -633,7 +673,7 @@ tradovate.post('/api/tradovate/exchange', requiresLogin, async (c) => {
     } catch {
       // cleanup is best-effort
     }
-    return c.json({ error: `Failed to connect: ${err.message}` }, 400);
+    return c.json({ error: `Bağlantı kurulamadı: ${err.message}` }, 400);
   }
 });
 
@@ -798,7 +838,7 @@ tradovate.post(
 
     await brokerDb.updateById(serviceClient, connectionId, { is_eval: isEval });
 
-    return c.json({ message: `Eval ${isEval ? 'enabled' : 'disabled'}` });
+    return c.json({ message: `Değerlendirme hesabı ${isEval ? 'etkinleştirildi' : 'devre dışı bırakıldı'}.` });
   },
 );
 
@@ -818,11 +858,33 @@ tradovate.post(
       accountIds?: number[];
       startDate?: string;
       endDate?: string;
+      timeZone?: string;
     };
 
-    const { connectionId, startDate, endDate } = body;
+    const { connectionId, startDate, endDate, timeZone } = body;
     if (!connectionId) {
       return c.json({ error: 'Bağlantı kimliği eksik.' }, 400);
+    }
+
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const validDate = (value: unknown) => {
+      if (value === undefined) return true;
+      if (typeof value !== 'string' || !datePattern.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00.000Z`);
+      return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    if (!validDate(startDate) || !validDate(endDate) || (timeZone !== undefined && typeof timeZone !== 'string')) {
+      return c.json({ error: 'Tarih aralığı geçersiz.' }, 400);
+    }
+    if (startDate && endDate && startDate > endDate) {
+      return c.json({ error: 'Başlangıç tarihi bitiş tarihinden sonra olamaz.' }, 400);
+    }
+    if (timeZone !== undefined) {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone }).format();
+      } catch {
+        return c.json({ error: 'Tarih aralığı geçersiz.' }, 400);
+      }
     }
 
     const accountIds = Array.isArray(body.accountIds)
@@ -834,17 +896,18 @@ tradovate.post(
         accountIds: accountIds.length > 0 ? accountIds : undefined,
         startDate,
         endDate,
+        timeZone,
       });
 
-      return c.json({ message: `Synced ${synced} new trades`, synced });
+      return c.json({ message: `${synced} yeni işlem eşitlendi.`, synced });
     } catch (err: any) {
       if (err.message === 'Connection not found') {
         return c.json({ error: 'Bağlantı bulunamadı.' }, 404);
       }
-      if (err.message.includes('expired')) {
+      if (err.message.includes('expired') || err.message.includes('süresi doldu')) {
         return c.json({ error: err.message, expired: true }, 401);
       }
-      return c.json({ error: `Sync failed: ${err.message}` }, 500);
+      return c.json({ error: `Eşitleme başarısız: ${err.message}` }, 500);
     }
   },
 );
@@ -867,7 +930,7 @@ tradovate.post(
     const brokerConns = await brokerDb.findByOwnerAndBroker(serviceClient, user.id, broker);
 
     if (brokerConns.length === 0) {
-      return c.json({ message: `No ${brokerLabel} connections found`, results: [] });
+      return c.json({ message: `${brokerLabel} bağlantısı bulunamadı.`, results: [] });
     }
 
     const results: Array<{
@@ -888,7 +951,7 @@ tradovate.post(
 
     const totalImported = results.reduce((sum, r) => sum + r.tradesImported, 0);
     return c.json({
-      message: `Synced ${totalImported} new trades across ${brokerConns.length} connection(s)`,
+      message: `${brokerConns.length} bağlantıdan toplam ${totalImported} yeni işlem eşitlendi.`,
       results,
     });
   },
@@ -907,7 +970,7 @@ tradovate.delete('/api/tradovate/connections/:connectionId', requiresLogin, asyn
     await brokerDb.deleteById(serviceClient, connectionId, user.id);
     return c.json({ message: 'Bağlantı silindi.' });
   } catch (err: any) {
-    return c.json({ error: `Failed to delete connection: ${err.message}` }, 500);
+    return c.json({ error: `Bağlantı silinemedi: ${err.message}` }, 500);
   }
 });
 
