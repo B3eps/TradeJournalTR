@@ -65,6 +65,10 @@ npm start
 
 Open http://localhost:8459 — that's it, no login. RR Metrics is single-user and fully local: the first run automatically creates the `data/` directory with the SQLite database, a screenshots folder, and a server secret key (used to encrypt broker credentials at rest). There are no accounts, passwords, or third-party auth.
 
+### Windows desktop releases
+
+The Electron desktop build uses `electron-updater` with public GitHub Releases. A push to `main` builds and publishes a Windows NSIS release and its updater metadata. Packaged users can check for updates from **Settings → Updates**; downloaded updates install when the app restarts. User data stays in the separate `%APPDATA%/trade-gunlugu/data/` directory. Existing installations using the former custom updater need one baseline installer to switch to this update mechanism; later application releases update in place.
+
 ### Try it with demo data
 
 ```bash

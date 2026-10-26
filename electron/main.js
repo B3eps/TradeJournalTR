@@ -1,10 +1,6 @@
-// Trade Günlüğü - Electron kabuğu (sabit exe)
-// Uygulama kodu (server.cjs + public/) önce kullanıcı klasöründen yüklenir:
-//   %APPDATA%\trade-gunlugu\app\   (server.cjs, schema.sql, public\, version.json)
-// Orası yoksa veya bozuksa exe içindeki yedek sürüm kullanılır. Böylece güncelleme
-// için exe'yi değiştirmek gerekmez, sadece bu klasördeki dosyalar yenilenir.
-// İsteğe bağlı uzak güncellemeler HTTPS ile indirilir, SHA-256 ile doğrulanır ve
-// kullanıcı verilerinden ayrı olan uygulama klasörüne atomik biçimde alınır.
+// Trade Günlüğü - Electron kabuğu.
+// Uygulamanın tamamı electron-updater ile GitHub Releases üzerinden güncellenir.
+// Kullanıcı verileri app.getPath('userData') altında tutulur ve uygulama güncellemelerinden ayrıdır.
 //
 // Kabuk özellikleri: sistem tepsisi (pencere kapanınca arka planda çalışır; hatırlatıcılar,
 // otomatik yedek ve haber bildirimleri sürer), global kısayollar
@@ -21,12 +17,23 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Module = require('module');
 const { waitForServer } = require('./boot-health');
-const { stageRemoteUpdate, activatePendingUpdate } = require('./remote-updates');
+const { autoUpdater } = require('electron-updater');
 
 
 const PORT = 8471;
 const START_HIDDEN = process.argv.includes('--hidden');
 const BOOT_TOKEN = crypto.randomBytes(32).toString('hex');
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.allowPrerelease = false;
+autoUpdater.on('download-progress', (progress) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('trade-gunlugu:update-progress', {
+    percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))),
+  });
+});
+autoUpdater.on('error', (error) => logRun(`guncelleme hatasi: ${error && error.message ? error.message : error}`));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -233,111 +240,43 @@ function isAppUrl(url) {
   } catch (e) { return false; }
 }
 
-function isValidUpdateDir(dir) {
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8'));
-    if (manifest.format !== 2 || !manifest.files || typeof manifest.files !== 'object') return false;
-    const required = ['server.cjs', 'schema.sql', 'public/trades.html', 'public/assets/appBundle.js', 'public/assets/app.css'];
-    if (required.some((name) => !Object.hasOwn(manifest.files, name))) return false;
-    const root = path.resolve(dir) + path.sep;
-    return Object.entries(manifest.files).every(([relative, expectedHash]) => {
-      if (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/i.test(expectedHash)) return false;
-      const file = path.resolve(dir, relative.replaceAll('/', path.sep));
-      if (!file.startsWith(root) || !fs.statSync(file).isFile()) return false;
-      const actualHash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-      return actualHash.toLowerCase() === expectedHash.toLowerCase();
-    });
-  } catch (e) {
-    return false;
-  }
-}
-
 function logRun(line) {
   try {
     fs.appendFileSync(path.join(app.getPath('userData'), 'last-run.log'), `${new Date().toISOString()} ${line}\n`);
   } catch (e) { /* günlük yazılamazsa sorun değil */ }
 }
 
-function getUpdateManifestUrl() {
-  const localConfig = path.join(app.getPath('userData'), 'update-channel.json');
-  const bundledConfig = path.join(app.getAppPath(), 'electron', 'update-channel.json');
-  for (const file of [localConfig, bundledConfig]) {
-    try {
-      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (typeof config.manifestUrl === 'string' && config.manifestUrl.trim()) return config.manifestUrl.trim();
-    } catch (e) { /* absent configuration */ }
-  }
-  return '';
-}
-
-function getUpdateRefUrl() {
-  const localConfig = path.join(app.getPath('userData'), 'update-channel.json');
-  const bundledConfig = path.join(app.getAppPath(), 'electron', 'update-channel.json');
-  for (const file of [localConfig, bundledConfig]) {
-    try {
-      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (typeof config.manifestUrl === 'string' && config.manifestUrl.trim() &&
-          typeof config.refUrl === 'string' && config.refUrl.trim()) return config.refUrl.trim();
-    } catch (e) { /* absent configuration */ }
-  }
-  return '';
-}
-
-function getBundledUpdateVersion() {
+async function checkForUpdates() {
+  if (!app.isPackaged) return { status: 'unavailable', version: app.getVersion(), message: 'Güncelleme kontrolü paketlenmiş uygulamada kullanılabilir.' };
   try {
-    const configPath = path.join(app.getAppPath(), 'electron', 'update-channel.json');
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return typeof config.bundledVersion === 'string' ? config.bundledVersion : '';
-  } catch (e) { return ''; }
-}
-
-function getInstalledVersion() {
-  const updateRoot = path.join(app.getPath('userData'), 'app');
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(updateRoot, 'version.json'), 'utf8'));
-    if (typeof manifest.version === 'string') return manifest.version;
-  } catch (e) { /* bundled version is used below */ }
-  return getBundledUpdateVersion() || app.getVersion();
-}
-
-async function checkRemoteUpdates() {
-  const manifestUrl = getUpdateManifestUrl();
-  if (!manifestUrl) return { status: 'unavailable', version: getInstalledVersion() };
-  try {
-    const result = await stageRemoteUpdate({
-      manifestUrl,
-      refUrl: getUpdateRefUrl(),
-      updateRoot: app.getPath('userData'),
-      currentVersion: getBundledUpdateVersion(),
-    });
-    if (!result.updated) return {
-      status: result.pending ? 'staged' : 'current',
-      version: result.version || getInstalledVersion(),
-    };
-    logRun(`uzak guncelleme hazir surum=${result.version}`);
-    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return { status: 'staged', version: result.version };
+    const check = await autoUpdater.checkForUpdates();
+    if (!check || !check.isUpdateAvailable) return { status: 'current', version: app.getVersion() };
+    const version = check.updateInfo.version;
+    logRun(`guncelleme bulundu surum=${version}; indiriliyor`);
+    await autoUpdater.downloadUpdate();
+    logRun(`guncelleme indirildi surum=${version}`);
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return { status: 'staged', version };
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Güncelleme hazır',
-      message: `Trade Günlüğü ${result.version} güncellemesi indirildi.`,
-      detail: 'Güncelleme mevcut verilerinizi korur. Şimdi yeniden başlatabilir veya bir sonraki açılışa bırakabilirsiniz.',
+      message: `Trade Günlüğü ${version} güncellemesi indirildi.`,
+      detail: 'Uygulama kapanacak, güncelleme kurulacak ve kullanıcı verileriniz korunacak.',
       buttons: ['Şimdi yeniden başlat', 'Daha sonra'],
       defaultId: 0,
       cancelId: 1,
     });
     if (choice.response === 0) {
       quitting = true;
-      app.relaunch();
-      app.exit(0);
+      autoUpdater.quitAndInstall(false, true);
     }
-    return { status: 'staged', version: result.version };
+    return { status: 'staged', version };
   } catch (err) {
-    logRun(`uzak guncelleme basarisiz: ${err && err.message ? err.message : err}`);
-    return { status: 'error', version: getInstalledVersion(), message: String((err && err.message) || err) };
+    logRun(`guncelleme denetimi basarisiz: ${err && err.message ? err.message : err}`);
+    return { status: 'error', version: app.getVersion(), message: String((err && err.message) || err) };
   }
 }
 
-ipcMain.handle('trade-gunlugu:get-version', () => getInstalledVersion());
+ipcMain.handle('trade-gunlugu:get-version', () => app.getVersion());
 ipcMain.handle('trade-gunlugu:chatgpt-news-state', async (event) => {
   assertTrustedAppIpc(event);
   return getChatGptNewsState();
@@ -397,7 +336,7 @@ ipcMain.handle('trade-gunlugu:chatgpt-news-evaluate', async (event, id) => {
 });
 ipcMain.handle('trade-gunlugu:check-updates', async (event) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) return { status: 'error', message: 'İstek doğrulanamadı.' };
-  return checkRemoteUpdates();
+  return checkForUpdates();
 });
 
 function showWindow() {
@@ -563,7 +502,6 @@ app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch (e) { 
 
 function startServer() {
   const bundledRoot = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
-  const updateDir = path.join(app.getPath('userData'), 'app');
   process.env.DATA_DIR = path.join(app.getPath('userData'), 'data');
   process.env.ACTIVITYWATCH_ROOT = app.isPackaged
     ? path.join(process.resourcesPath, 'activitywatch')
@@ -577,36 +515,13 @@ function startServer() {
   process.env.NODE_PATH = [bundledModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
   Module._initPaths();
 
-  if (isValidUpdateDir(updateDir)) {
-    try {
-      let version = '?';
-      try { version = JSON.parse(fs.readFileSync(path.join(updateDir, 'version.json'), 'utf8')).version; } catch (e) { /* yok say */ }
-      process.chdir(updateDir); // sunucu 'public' klasörünü cwd'den okur
-      require(path.join(updateDir, 'server.cjs'));
-      logRun(`kaynak=guncelleme-klasoru surum=${version}`);
-      return;
-    } catch (err) {
-      logRun(`guncelleme klasoru yuklenemedi, yedege geciliyor: ${err && err.message}`);
-    }
-  }
   process.chdir(bundledRoot);
   require('./server.cjs');
-  logRun('kaynak=exe-yedek');
+  logRun(`kaynak=paketli-uygulama surum=${app.getVersion()}`);
 }
 
 app.whenReady().then(async () => {
   try {
-    // The update directory may be the old process cwd while the app is running.
-    // Switch to the stable user-data root before applying a staged directory swap.
-    const userDataRoot = app.getPath('userData');
-    process.chdir(userDataRoot);
-    try {
-      const activated = activatePendingUpdate(userDataRoot);
-      if (activated.updated) logRun(`uzak guncelleme etkin surum=${activated.version}`);
-      else if (activated.invalid) logRun('hazir guncelleme bozuk bulundu; eski surum korunuyor');
-    } catch (error) {
-      logRun(`uzak guncelleme etkinlestirilemedi; eski surum korunuyor: ${error && error.message ? error.message : error}`);
-    }
     logRun('baslangic: pencere hazirlaniyor');
     iconPath = path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'), 'public', 'assets', 'img', 'favicon.png');
     createWindow(START_HIDDEN);

@@ -1,21 +1,18 @@
-name: Publish Trade Gunlugu update
+name: Release Trade Gunlugu
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-and-publish:
+  build-and-release:
     runs-on: windows-latest
-    env:
-      UPDATE_TOKEN_CONFIGURED: ${{ secrets.UPDATES_REPO_TOKEN != '' }}
     steps:
-      - name: Check out private application source
+      - name: Check out source
         uses: actions/checkout@v4
 
       - name: Set up Node.js
@@ -27,42 +24,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure public binary-only update feed
+      - name: Set a unique release version
         shell: pwsh
+        run: |
+          $version = "1.0.$env:GITHUB_RUN_NUMBER"
+          npm version $version --no-git-tag-version
+
+      - name: Prepare bundled ActivityWatch
+        shell: pwsh
+        run: ./scripts/prepare-activitywatch.ps1
+
+      - name: Build application
+        run: npm run build
+
+      - name: Bundle local server
+        run: npm run bundle
+
+      - name: Publish Windows release and updater metadata
         env:
-          UPDATE_REPO: B3eps/TradeJournalTR-Updates
-        run: |
-          if ($env:UPDATE_REPO -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Set the repository variable UPDATE_REPO to owner/repository.' }
-          $url = "https://raw.githubusercontent.com/$($env:UPDATE_REPO)/main/version.json"
-          $repoPath = $env:UPDATE_REPO
-          $config = @{ manifestUrl = $url; refUrl = "https://api.github.com/repos/$repoPath/commits/main" } | ConvertTo-Json
-          [IO.File]::WriteAllText((Join-Path $PWD 'electron/update-channel.json'), $config + "`n", [Text.UTF8Encoding]::new($false))
-
-      - name: Build update files
-        shell: pwsh
-        run: ./scripts/package-update-feed.ps1 -OutputRoot "$PWD/dist-app/update-feed"
-
-      - name: Check out public update-only repository
-        if: ${{ env.UPDATE_TOKEN_CONFIGURED == 'true' }}
-        uses: actions/checkout@v4
-        with:
-          repository: B3eps/TradeJournalTR-Updates
-          ref: main
-          token: ${{ secrets.UPDATES_REPO_TOKEN }}
-          path: updates
-
-      - name: Publish manifest and app update files
-        if: ${{ env.UPDATE_TOKEN_CONFIGURED == 'true' }}
-        shell: pwsh
-        run: |
-          Copy-Item -Path "$PWD/dist-app/update-feed/stage/*" -Destination "$PWD/updates" -Recurse -Force
-          git -C updates config user.name "github-actions[bot]"
-          git -C updates config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C updates add --all
-          git -C updates commit -m "Publish application update $(Get-Date -Format 'yyyy.MM.dd-HHmmss')"
-          git -C updates push origin main
-
-      - name: Report missing update-publisher credential
-        if: ${{ env.UPDATE_TOKEN_CONFIGURED != 'true' }}
-        shell: pwsh
-        run: Write-Warning 'App source build succeeded, but the update feed was not published. Add the UPDATES_REPO_TOKEN repository secret to enable automatic in-app updates.'
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder --win nsis --publish always

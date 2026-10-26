@@ -366,6 +366,13 @@ const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, custom
     if (desktop && typeof desktop.getVersion === 'function') {
       desktop.getVersion().then(setAppVersion).catch(() => setAppVersion('Bilinmiyor'));
     }
+    if (desktop && typeof desktop.onUpdateProgress === 'function') {
+      return desktop.onUpdateProgress((progress) => {
+        const percent = Number.isFinite(progress && progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : 0;
+        setUpdateMessage(`Güncelleme indiriliyor… %${percent}`);
+      });
+    }
+    return undefined;
   }, []);
 
   const checkUpdates = async () => {
@@ -379,8 +386,8 @@ const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, custom
     try {
       const result = await desktop.checkForUpdates();
       if (result.status === 'current') setUpdateMessage(`Uygulama güncel. Sürüm ${result.version || appVersion}.`);
-      else if (result.status === 'staged') setUpdateMessage(`Sürüm ${result.version} indirildi. Yeniden başlatma penceresinden şimdi uygulayabilir veya daha sonra başlatabilirsiniz.`);
-      else if (result.status === 'unavailable') setUpdateMessage('Güncelleme kanalı yapılandırılmamış.');
+      else if (result.status === 'staged') setUpdateMessage(`Sürüm ${result.version} indirildi. Şimdi yeniden başlatabilir veya uygulamayı kapattığınızda kurabilirsiniz.`);
+      else if (result.status === 'unavailable') setUpdateMessage(result.message || 'Güncellemeler paketlenmiş masaüstü sürümünde kullanılabilir.');
       else setUpdateMessage(`Güncelleme denetlenemedi: ${result.message || 'Bağlantı hatası.'}`);
     } catch (err) {
       setUpdateMessage(`Güncelleme denetlenemedi: ${err.message || 'Bağlantı hatası.'}`);
@@ -1442,6 +1449,7 @@ const SettingsPage = ({ onSyncComplete, onNavigate, theme, onThemeChange, custom
         <div className="max-w-2xl bg-bg-surface border border-border rounded-xl p-6">
           <h3 className="text-text-primary font-semibold">Uygulama güncellemesi</h3>
           <p className="text-text-secondary text-sm mt-1">Yüklü sürüm: <span className="font-mono text-text-primary">{appVersion || 'Yükleniyor…'}</span></p>
+          <p className="text-text-tertiary text-xs mt-1">Güncellemeler GitHub Releases üzerinden indirilir ve uygulama yeniden başlatıldığında kurulur.</p>
           <button type="button" onClick={checkUpdates} disabled={updateBusy}
             className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 bg-accent text-accent-text text-sm font-medium rounded-lg hover:brightness-110 transition-all disabled:opacity-50">
             <Icons.RefreshCw className={`w-4 h-4 ${updateBusy ? 'animate-spin' : ''}`} />
