@@ -236,7 +236,13 @@ export function scanEvaluations(force = false): Map<string, Evaluation> {
         if (stat.size <= 256 * 1024) {
           try {
             const text = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
-            ev = sanitizeEvaluation(JSON.parse(text), id, stat.mtime);
+            const raw: unknown = JSON.parse(text);
+            const parsed = evaluationInputSchema.safeParse(raw);
+            // Only a complete evaluation for this news item may suppress its queue entry.
+            if (parsed.success && parsed.data.id === id) {
+              const sanitized = sanitizeEvaluation(parsed.data, id, stat.mtime);
+              if (sanitized?.ozet) ev = sanitized;
+            }
           } catch {
             ev = null; // invalid JSON: ignore until the file changes
           }
