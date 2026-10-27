@@ -87,23 +87,36 @@ jobs:
             if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
           }
 
-          $releaseJson = gh release view $env:RELEASE_TAG --json isDraft,assets 2>$null
+          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG" 2>$null
           $releaseExists = $LASTEXITCODE -eq 0
           if (-not $releaseExists) {
             gh release create $env:RELEASE_TAG --draft --title $env:RELEASE_TAG --generate-notes
             if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $env:RELEASE_TAG" }
-            $releaseJson = gh release view $env:RELEASE_TAG --json isDraft,assets
+            $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG"
             if ($LASTEXITCODE -ne 0) { throw "Could not inspect draft release $env:RELEASE_TAG" }
           }
 
           $release = $releaseJson | ConvertFrom-Json
-          $presentNames = @($release.assets | ForEach-Object { $_.name })
-          if (-not $release.isDraft) {
-            $missing = @($expectedNames | Where-Object { $_ -notin $presentNames })
-            if ($missing.Count -gt 0) {
-              throw "Published release $env:RELEASE_TAG is incomplete (missing: $($missing -join ', ')); refusing to modify a public release"
+          $expectedAssets = @{}
+          foreach ($assetPath in $assets) {
+            $file = Get-Item -LiteralPath $assetPath
+            $hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expectedAssets[$file.Name] = @{ Size = [long]$file.Length; Digest = "sha256:$hash" }
+          }
+          function Assert-ReleaseAssets($releaseAssets, $label) {
+            foreach ($name in $expectedNames) {
+              $assetMatches = @($releaseAssets | Where-Object { $_.name -eq $name })
+              if ($assetMatches.Count -ne 1) { throw "$label must contain exactly one $name asset" }
+              $actual = $assetMatches[0]
+              $expected = $expectedAssets[$name]
+              if ($actual.state -ne "uploaded" -or [long]$actual.size -ne $expected.Size -or $actual.digest -ne $expected.Digest) {
+                throw "$label asset $name does not match this run's build (expected $($expected.Digest), $($expected.Size) bytes; got $($actual.digest), $($actual.size) bytes, state $($actual.state))"
+              }
             }
-            Write-Host "Published release $env:RELEASE_TAG already has all expected assets; leaving it unchanged"
+          }
+          if (-not $release.draft) {
+            Assert-ReleaseAssets $release.assets "Published release $env:RELEASE_TAG"
+            Write-Host "Published release $env:RELEASE_TAG has the expected build assets; leaving it unchanged"
             exit 0
           }
 
@@ -112,14 +125,13 @@ jobs:
           gh release upload $env:RELEASE_TAG @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw "Asset upload failed; draft $env:RELEASE_TAG remains unpublished and can be retried" }
 
-          $releaseJson = gh release view $env:RELEASE_TAG --json isDraft,assets
+          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG"
           if ($LASTEXITCODE -ne 0) { throw "Could not verify draft release $env:RELEASE_TAG" }
           $release = $releaseJson | ConvertFrom-Json
-          $presentNames = @($release.assets | ForEach-Object { $_.name })
-          $missing = @($expectedNames | Where-Object { $_ -notin $presentNames })
-          if (-not $release.isDraft -or $missing.Count -gt 0) {
-            throw "Draft release $env:RELEASE_TAG failed completeness verification (missing: $($missing -join ', ')); it remains unpublished"
+          if (-not $release.draft) {
+            throw "Release $env:RELEASE_TAG was published before verification completed"
           }
+          Assert-ReleaseAssets $release.assets "Draft release $env:RELEASE_TAG"
 
           gh release edit $env:RELEASE_TAG --draft=false
           if ($LASTEXITCODE -ne 0) { throw "Could not publish complete release $env:RELEASE_TAG" }
