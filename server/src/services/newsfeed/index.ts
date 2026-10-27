@@ -208,7 +208,7 @@ function tick(): void {
 
 // --- evaluations (read from DATA_DIR/news-eval/<id>.json) ---
 
-const evalCache = new Map<string, { mtimeMs: number; size: number; ev: Evaluation | null }>();
+const evalCache = new Map<string, { mtimeMs: number; size: number; contentHash: string | null; ev: Evaluation | null }>();
 let lastEvalScan = 0;
 
 export function scanEvaluations(force = false): Map<string, Evaluation> {
@@ -231,12 +231,18 @@ export function scanEvaluations(force = false): Map<string, Evaluation> {
         const full = path.join(NEWS_EVAL_DIR, f);
         const stat = fs.statSync(full);
         const cached = evalCache.get(id);
-        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) continue;
+        let content = '';
+        let contentHash: string | null = null;
+        if (stat.size <= 256 * 1024) {
+          content = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
+          contentHash = crypto.createHash('sha256').update(content).digest('hex');
+        }
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size
+          && cached.contentHash === contentHash) continue;
         let ev: Evaluation | null = null;
         if (stat.size <= 256 * 1024) {
           try {
-            const text = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
-            const raw: unknown = JSON.parse(text);
+            const raw: unknown = JSON.parse(content);
             const parsed = evaluationInputSchema.safeParse(raw);
             // Only a complete evaluation for this news item may suppress its queue entry.
             if (parsed.success && parsed.data.id === id) {
@@ -247,9 +253,10 @@ export function scanEvaluations(force = false): Map<string, Evaluation> {
             ev = null; // invalid JSON: ignore until the file changes
           }
         }
-        evalCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, ev });
+        evalCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, contentHash, ev });
       } catch {
-        // file vanished between readdir and stat
+        // A stale cached evaluation must never suppress an item after a read error.
+        evalCache.delete(id);
       }
     }
     for (const id of [...evalCache.keys()]) if (!seen.has(id)) evalCache.delete(id);

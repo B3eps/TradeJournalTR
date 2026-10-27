@@ -143,9 +143,14 @@ export const ORDER_LANGUAGE_PATTERNS: RegExp[] = [
   // Catch direct order wording with the instrument between the verb and price.
   // Examples: "Buy EURUSD at 1.08", "Sell XAUUSD 2350".
   /\b(?:buy|sell)\s+[a-z0-9._/-]{3,20}\s+(?:at\s+)?\d{1,7}(?:[.,]\d+)?\b/i,
+  // Also cover reversed word orders: "Buy 1.08 EURUSD" / "EURUSD at 1.08 buy".
+  /\b(?:buy|sell)\s+\d{1,7}(?:[.,]\d+)?\s+[a-z0-9._/-]{3,20}\b/i,
+  /\b[a-z0-9._/-]{3,20}\s+(?:at\s+)?\d{1,7}(?:[.,]\d+)?\s+(?:buy|sell)\b/i,
   // Turkish price advice commonly puts the instrument and price before the verb.
   // Examples: "EURUSD 1.08'den al", "XAUUSD 2350 üzerinden sat".
   /\b[a-z0-9._/-]{3,20}\s+\d{1,7}(?:[.,]\d+)?\s*(?:['’]?(?:den|dan|ten|tan)|(?:üzerinden|uzerinden|altından|altindan))?\s+(?:al|sat)(?:ım|im|ış|is|ın|in|ını|ini|ışını|isini)?\b/i,
+  /\b[a-z0-9._/-]{3,20}\s+\d{1,7}(?:[.,]\d+)?\s*(?:seviyesinden|seviyesinde|fiyatından|fiyatindan)\s+(?:al|sat)\p{L}*/iu,
+  /\b[a-z0-9._/-]{3,20}\s+\d{1,7}(?:[.,]\d+)?\s*(?:['’]?(?:den|dan|ten|tan)|(?:üzerinden|uzerinden|seviyesinden|seviyesinde))?\s+(?:alış\s+yap|alis\s+yap|satış\s+yap|satis\s+yap)\p{L}*/iu,
   // Conditional price-level trade advice (e.g. "EURUSD 1.08 altında satış düşünülebilir").
   /\b\d{1,6}(?:[.,]\d+)\s*(?:altında|altinda|üzerinde|uzerinde|altına|altina|üstünde|ustunde|below|under|above|over)\s*(?:al|sat)\p{L}*/iu,
 ];
