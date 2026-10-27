@@ -92,6 +92,7 @@ const TaskDrawer = ({
   const savedTimer = useRef(null);
   const asideRef = useRef(null);
   const detailRef = useRef(detail);
+  const searchRequestRef = useRef(0);
   detailRef.current = detail;
 
   useEffect(() => {
@@ -206,16 +207,19 @@ const TaskDrawer = ({
   // ---- link search (debounced) ----
   useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setResults(null); setSearchError(''); setSearching(false); return undefined; }
+    const requestId = ++searchRequestRef.current;
+    setResults(null);
+    setSearchError('');
+    if (term.length < 2) { setSearching(false); return undefined; }
     setSearching(true);
     const h = setTimeout(async () => {
       try {
         const r = await api.search(term, 6);
-        if (mountedRef.current) { setResults(r); setSearchError(''); }
+        if (mountedRef.current && requestId === searchRequestRef.current) { setResults(r); setSearchError(''); }
       } catch (e) {
-        if (mountedRef.current) { setResults(null); setSearchError(e.message || 'Arama yapılamadı.'); }
+        if (mountedRef.current && requestId === searchRequestRef.current) { setResults(null); setSearchError(e.message || 'Arama yapılamadı.'); }
       }
-      if (mountedRef.current) setSearching(false);
+      if (mountedRef.current && requestId === searchRequestRef.current) setSearching(false);
     }, 250);
     return () => clearTimeout(h);
   }, [q]);
@@ -865,7 +869,7 @@ const TaskDrawer = ({
               <TI.Search className="w-3.5 h-3.5 text-text-muted" />
               <input
                 value={q}
-                onChange={(e) => { setQ(e.target.value); setLinkMsg(''); }}
+                onChange={(e) => { searchRequestRef.current += 1; setResults(null); setSearchError(''); setSearching(false); setQ(e.target.value); setLinkMsg(''); }}
                 onKeyDown={(e) => { if (e.key === 'Escape' && q) { e.preventDefault(); e.stopPropagation(); setQ(''); } }}
                 placeholder="İlişkilendir: işlem, haber, görev ara…"
                 aria-label="İlişkilendirilecek öğeyi ara"
