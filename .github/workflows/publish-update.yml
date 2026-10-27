@@ -87,15 +87,18 @@ jobs:
             if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
           }
 
-          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG" 2>$null
+          $releaseInfoJson = gh release view $env:RELEASE_TAG --json databaseId,isDraft 2>$null
           $releaseExists = $LASTEXITCODE -eq 0
           if (-not $releaseExists) {
             gh release create $env:RELEASE_TAG --draft --title $env:RELEASE_TAG --generate-notes
             if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $env:RELEASE_TAG" }
-            $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG"
+            $releaseInfoJson = gh release view $env:RELEASE_TAG --json databaseId,isDraft
             if ($LASTEXITCODE -ne 0) { throw "Could not inspect draft release $env:RELEASE_TAG" }
           }
 
+          $releaseInfo = $releaseInfoJson | ConvertFrom-Json
+          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/$($releaseInfo.databaseId)"
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect release assets for $env:RELEASE_TAG" }
           $release = $releaseJson | ConvertFrom-Json
           $expectedAssets = @{}
           foreach ($assetPath in $assets) {
@@ -125,7 +128,7 @@ jobs:
           gh release upload $env:RELEASE_TAG @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw "Asset upload failed; draft $env:RELEASE_TAG remains unpublished and can be retried" }
 
-          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/tags/$env:RELEASE_TAG"
+          $releaseJson = gh api "repos/B3eps/TradeJournalTR/releases/$($releaseInfo.databaseId)"
           if ($LASTEXITCODE -ne 0) { throw "Could not verify draft release $env:RELEASE_TAG" }
           $release = $releaseJson | ConvertFrom-Json
           if (-not $release.draft) {
