@@ -312,11 +312,13 @@ const TradeListPage = ({ trades, triggerReload, onEdit, onOpenForm, onOpenImport
   }
 
   if (dateFrom) {
-    const from = new Date(dateFrom);
+    // Date inputs contain a calendar date, not a UTC timestamp. Parse at local
+    // midnight so trades earlier than 03:00 are not lost in UTC+03 locales.
+    const from = new Date(`${dateFrom}T00:00:00`);
     filtered = filtered.filter(t => new Date(t.exitTime) >= from);
   }
   if (dateTo) {
-    const to = new Date(dateTo);
+    const to = new Date(`${dateTo}T00:00:00`);
     to.setHours(23, 59, 59, 999);
     filtered = filtered.filter(t => new Date(t.exitTime) <= to);
   }

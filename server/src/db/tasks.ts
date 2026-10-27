@@ -662,6 +662,7 @@ function parseTaskBody(
   userId: string,
   body: Record<string, unknown>,
   existingId?: string,
+  existingDueDate: string | null = null,
 ): { cols: TaskColumns; labelIds?: string[] } {
   const cols: TaskColumns = {};
   if (body.title !== undefined || !existingId) cols.title = reqString(body.title, 'Görev başlığı', 500);
@@ -715,7 +716,11 @@ function parseTaskBody(
     else if (!isValidDate(body.dueDate)) throw bad('Bitiş tarihi YYYY-AA-GG biçiminde geçerli bir tarih olmalı.');
     else cols.due_date = body.dueDate;
   }
-  if (body.dueTime !== undefined && cols.due_date !== null) {
+  const effectiveDueDate = cols.due_date === undefined ? existingDueDate : cols.due_date;
+  if (body.dueTime !== undefined && !isNullish(body.dueTime) && !effectiveDueDate) {
+    throw bad('Saat için bir bitiş tarihi de gerekli.');
+  }
+  if (body.dueTime !== undefined && effectiveDueDate !== null) {
     if (isNullish(body.dueTime)) cols.due_time = null;
     else if (!isValidTime(body.dueTime)) throw bad('Saat SS:DD biçiminde olmalı (ör. 09:30).');
     else cols.due_time = body.dueTime;
@@ -784,9 +789,11 @@ export function createTask(db: Db, userId: string, body: Record<string, unknown>
 }
 
 export function updateTask(db: Db, userId: string, id: string, body: Record<string, unknown>): TaskAPI | null {
-  const existing = db.prepare('SELECT status FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as { status: string } | undefined;
+  const existing = db.prepare('SELECT status, due_date FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as
+    | { status: string; due_date: string | null }
+    | undefined;
   if (!existing) return null;
-  const { cols, labelIds } = parseTaskBody(db, userId, body, id);
+  const { cols, labelIds } = parseTaskBody(db, userId, body, id, existing.due_date);
   const entries = Object.entries(cols);
   const now = nowIso();
   db.transaction(() => {
