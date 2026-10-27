@@ -128,6 +128,7 @@ const FocusPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{s.announcement}</p>
       <FadeIn className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-primary">Odak</h1>

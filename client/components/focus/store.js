@@ -30,7 +30,7 @@ const initialState = () => {
   const settings = { ...DEFAULT_SETTINGS, ...((saved && saved.settings) || {}) };
   const base = {
     kind: 'work', status: 'idle', endsAt: null, remainingMs: durationMs('work', settings), totalMs: durationMs('work', settings),
-    startedAt: null, taskId: null, taskTitle: '', cycle: 0, settings, version: 0, notice: '', timerTaskId: null,
+    startedAt: null, taskId: null, taskTitle: '', cycle: 0, settings, version: 0, notice: '', announcement: '', timerTaskId: null,
   };
   if (!saved || typeof saved !== 'object') return base;
   const kind = ['work', 'short', 'long'].includes(saved.kind) ? saved.kind : 'work';
@@ -56,7 +56,7 @@ const listeners = new Set();
 let timeoutId = null;
 
 const persist = () => {
-  const { notice, version, ...rest } = state;
+  const { notice, announcement, version, ...rest } = state;
   writeJson(KEY, rest);
 };
 
@@ -129,9 +129,9 @@ const announce = (title, body) => {
 
 const nextAfterWork = (cycleAfter, settings) => (cycleAfter >= settings.longEvery ? 'long' : 'short');
 
-const idleState = (kind, cycle) => ({
+const idleState = (kind, cycle, announcement = '') => ({
   kind, status: 'idle', endsAt: null, startedAt: null, cycle,
-  totalMs: durationMs(kind, state.settings), remainingMs: durationMs(kind, state.settings),
+  totalMs: durationMs(kind, state.settings), remainingMs: durationMs(kind, state.settings), announcement,
 });
 
 const recordPartial = () => {
@@ -170,9 +170,11 @@ const complete = (late) => {
   let cycle = s.cycle;
   if (s.kind === 'work') { cycle += 1; nextKind = nextAfterWork(cycle, s.settings); }
   else { nextKind = 'work'; if (s.kind === 'long') cycle = 0; }
-  set(idleState(nextKind, cycle));
+  const title = s.kind === 'work' ? 'Odak tamamlandı' : 'Mola bitti';
+  const body = s.kind === 'work' ? `${KIND_LABELS[nextKind]} zamanı. Biraz nefes al.` : 'Hazır olduğunda yeni bir odak oturumu başlat.';
+  set(idleState(nextKind, cycle, late ? `${title}. ${body}` : ''));
   if (!late) {
-    announce(s.kind === 'work' ? 'Odak tamamlandı' : 'Mola bitti', s.kind === 'work' ? `${KIND_LABELS[nextKind]} zamanı. Biraz nefes al.` : 'Hazır olduğunda yeni bir odak oturumu başlat.');
+    announce(title, body);
   }
   if (s.settings.autoStartBreaks && nextKind !== 'work' && !late) start();
 };
@@ -189,7 +191,7 @@ function start() {
   if (s.status === 'running') return;
   const now = Date.now();
   const remaining = s.remainingMs > 0 ? s.remainingMs : s.totalMs;
-  set({ status: 'running', endsAt: now + remaining, remainingMs: remaining, startedAt: s.startedAt || now, notice: '' });
+  set({ status: 'running', endsAt: now + remaining, remainingMs: remaining, startedAt: s.startedAt || now, notice: '', announcement: '' });
   schedule();
   startTaskTimer();
   askNotificationPermission();
