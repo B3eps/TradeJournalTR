@@ -29,7 +29,13 @@ const Card = ({ task, project, showProject, selected, completing, isRunning, now
         <div className="pt-0.5">
           <AnimatedCheck checked={done} onChange={() => { if (!pending) onToggle(task); }} size={16} color={task.priority < 4 ? pm.color : 'rgb(var(--accent))'} aria-label="Tamamla" />
         </div>
-        <span className={`flex-1 min-w-0 text-sm leading-snug break-words ${done ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{task.title}</span>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onSelect(task.id); onOpen(task); }}
+          className={`flex-1 min-w-0 text-left text-sm leading-snug break-words rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${done ? 'line-through text-text-tertiary' : 'text-text-primary'}`}
+        >
+          {task.title}
+        </button>
         {task.status !== 'done' && !pending && (
           <button
             type="button"

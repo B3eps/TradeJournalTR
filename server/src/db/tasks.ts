@@ -696,6 +696,7 @@ function parseTaskBody(
           if (cur === existingId) throw bad('Bu işlem görev hiyerarşisinde döngü oluşturur.');
           cur = (db.prepare('SELECT parent_id FROM tasks WHERE id = ?').get(cur) as { parent_id: string | null } | undefined)?.parent_id ?? null;
         }
+        if (cur) throw bad('Görev hiyerarşisi çok derin veya geçersiz.');
       }
       cols.parent_id = parent.id;
       // New subtasks inherit the parent's project unless one was given.

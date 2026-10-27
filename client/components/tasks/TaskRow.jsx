@@ -119,9 +119,13 @@ const TaskRow = ({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           {task.priority < 4 && <TI.Flag className={`w-3.5 h-3.5 flex-shrink-0 ${pm.text}`} aria-label={pm.label} />}
-          <span className={`text-sm truncate transition-colors ${done ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onSelect(task.id); onOpen(task); }}
+            className={`min-w-0 truncate text-left transition-colors rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${done ? 'text-sm line-through text-text-tertiary' : 'text-sm text-text-primary'}`}
+          >
             {task.title}
-          </span>
+          </button>
           {orphanSubtask && <span className="text-[10px] text-text-muted flex-shrink-0">alt görev</span>}
         </div>
         {task.notes && !done && (
