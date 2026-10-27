@@ -11,6 +11,8 @@ const { cn } = require('../../lib/utils');
 const sound = require('../../utils/sound');
 const { useAnimationPreference } = require('../ui/motion');
 
+let muteTimeout = null;
+
 const Switch = ({ checked, onChange, label }) => (
   <button
     type="button"
@@ -54,12 +56,18 @@ const SoundSettings = ({ side = 'right', align = 'end', trigger, className }) =>
 
   const toggleSound = (next) => {
     if (next) {
+      if (muteTimeout) clearTimeout(muteTimeout);
+      muteTimeout = null;
       sound.setEnabled(true);
       sound.play('toggle-on');
     } else {
       sound.play('toggle-off');
       // Let the "off" sound be heard before muting.
-      setTimeout(() => sound.setEnabled(false), 120);
+      if (muteTimeout) clearTimeout(muteTimeout);
+      muteTimeout = setTimeout(() => {
+        muteTimeout = null;
+        sound.setEnabled(false);
+      }, 120);
     }
   };
 

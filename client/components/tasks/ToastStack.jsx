@@ -42,7 +42,7 @@ const ToastStack = ({ toasts, onAction, onDismiss }) => {
               <div className="h-0.5 bg-bg-input">
                 <div
                   className="h-full bg-accent/70"
-                  style={{ width: '100%', animation: `tasks-toast-shrink ${t.duration}ms linear forwards` }}
+                  style={{ width: '100%', animation: animate ? `tasks-toast-shrink ${t.duration}ms linear forwards` : 'none' }}
                 />
               </div>
             )}
