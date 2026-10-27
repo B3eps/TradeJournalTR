@@ -4,7 +4,7 @@
  *   <SoundSettings trigger={<button>...</button>} />
  */
 const React = require('react');
-const { useState } = React;
+const { useEffect, useRef, useState } = React;
 const { Volume2, Volume1, VolumeX, Sparkles } = require('lucide-react');
 const { Popover, PopoverTrigger, PopoverContent } = require('../ui/popover');
 const { cn } = require('../../lib/utils');
@@ -47,19 +47,30 @@ const Row = ({ icon: Icon, title, hint, children }) => (
 
 const SoundSettings = ({ side = 'right', align = 'end', trigger, className }) => {
   const [open, setOpen] = useState(false);
+  const muteTimeout = useRef(null);
   const { enabled, volume } = sound.useSound();
   const [animPref, setAnimPref] = useAnimationPreference();
+
+  useEffect(() => () => {
+    if (muteTimeout.current) clearTimeout(muteTimeout.current);
+  }, []);
 
   const VolIcon = !enabled || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
   const toggleSound = (next) => {
     if (next) {
+      if (muteTimeout.current) clearTimeout(muteTimeout.current);
+      muteTimeout.current = null;
       sound.setEnabled(true);
       sound.play('toggle-on');
     } else {
       sound.play('toggle-off');
       // Let the "off" sound be heard before muting.
-      setTimeout(() => sound.setEnabled(false), 120);
+      if (muteTimeout.current) clearTimeout(muteTimeout.current);
+      muteTimeout.current = setTimeout(() => {
+        muteTimeout.current = null;
+        sound.setEnabled(false);
+      }, 120);
     }
   };
 
