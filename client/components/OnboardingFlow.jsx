@@ -51,7 +51,7 @@ const WelcomePage = ({ onSelect }) => (
   </div>
 );
 
-const WhatWeDoPage = ({ onNext, ready }) => (
+const WhatWeDoPage = ({ onNext }) => (
   <div className="onboard-page-content">
     <h1 className="text-3xl font-bold mb-2">
       <span className="text-accent">Trade Günlüğü</span><span className="text-text-primary"> nedir?</span>
@@ -81,7 +81,7 @@ const WhatWeDoPage = ({ onNext, ready }) => (
         </div>
       ))}
     </div>
-    <div className={`flex flex-col items-center gap-3 transition-opacity duration-500 ${ready ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+    <div className="flex flex-col items-center gap-3">
       <button onClick={onNext} className="onboard-btn-primary">İleri</button>
       <a
         href="/guides/getting-started"
@@ -116,7 +116,7 @@ const MORE_BROKERS = [
 
 const ALL_ONBOARD_BROKERS = [...PRIMARY_BROKERS, ...MORE_BROKERS];
 
-const BrokerConnectPage = ({ onNext, onSkip, ready }) => {
+const BrokerConnectPage = ({ onNext, onSkip }) => {
   const [connecting, setConnecting] = useState(false);
   const [connectingBroker, setConnectingBroker] = useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -211,7 +211,7 @@ const BrokerConnectPage = ({ onNext, onSkip, ready }) => {
     };
 
     return (
-      <div className="onboard-page-content cursor-pointer" onClick={() => { if (ready) onNext(); }}>
+      <div className="onboard-page-content cursor-pointer" onClick={onNext}>
         <div className="w-16 h-16 rounded-full bg-positive/20 flex items-center justify-center onboard-check-pop mb-4">
           <Icons.Check className="w-8 h-8 text-positive" />
         </div>
@@ -235,7 +235,7 @@ const BrokerConnectPage = ({ onNext, onSkip, ready }) => {
           Başka bir hesap bağla
         </button>
 
-        <p className={`text-text-muted text-xs onboard-float transition-opacity duration-500 ${ready ? 'opacity-100' : 'opacity-0'}`}>Devam etmek için herhangi bir yere tıklayın</p>
+        <p className="text-text-muted text-xs onboard-float">Devam etmek için herhangi bir yere tıklayın</p>
       </div>
     );
   }
@@ -337,7 +337,7 @@ const BrokerConnectPage = ({ onNext, onSkip, ready }) => {
   );
 };
 
-const CustomizePage = ({ theme, customColors, onThemeChange, onNext, ready }) => {
+const CustomizePage = ({ theme, customColors, onThemeChange, onNext }) => {
   const [selectedTheme, setSelectedTheme] = useState(theme === 'custom' ? 'dark' : theme);
   const [accentColor, setAccentColor] = useState(customColors?.accent || '');
 
@@ -414,7 +414,7 @@ const CustomizePage = ({ theme, customColors, onThemeChange, onNext, ready }) =>
       </div>
 
       <p className="text-text-muted text-xs mb-6">Bunu daha sonra Ayarlar &rarr; Tercihler bölümünden değiştirebilirsiniz.</p>
-      <button onClick={onNext} className={`onboard-btn-primary transition-opacity duration-500 ${ready ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>İleri</button>
+      <button onClick={onNext} className="onboard-btn-primary">İleri</button>
     </div>
   );
 };
@@ -445,17 +445,8 @@ const OnboardingFlow = ({ onComplete, theme, customColors, onThemeChange }) => {
   const [pageIndex, setPageIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [animating, setAnimating] = useState(false);
-  const [pageReady, setPageReady] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const containerRef = useRef(null);
-  const readyTimerRef = useRef(null);
-
-  // Reset the 3-second gate whenever pageIndex changes
-  useEffect(() => {
-    setPageReady(false);
-    readyTimerRef.current = setTimeout(() => setPageReady(true), 3000);
-    return () => clearTimeout(readyTimerRef.current);
-  }, [pageIndex]);
 
   // Build page list dynamically based on experience level
   const needsExplainer = experience === 'beginner' || experience === 'never';
@@ -507,11 +498,11 @@ const OnboardingFlow = ({ onComplete, theme, customColors, onThemeChange }) => {
       case 'welcome':
         return <WelcomePage onSelect={handleExperienceSelect} />;
       case 'whatwedo':
-        return <WhatWeDoPage onNext={goNext} ready={pageReady} />;
+        return <WhatWeDoPage onNext={goNext} />;
       case 'broker':
-        return <BrokerConnectPage onNext={goNext} onSkip={goNext} ready={pageReady} />;
+        return <BrokerConnectPage onNext={goNext} onSkip={goNext} />;
       case 'customize':
-        return <CustomizePage theme={theme} customColors={customColors} onThemeChange={onThemeChange} onNext={goNext} ready={pageReady} />;
+        return <CustomizePage theme={theme} customColors={customColors} onThemeChange={onThemeChange} onNext={goNext} />;
       case 'goodluck':
         return <GoodLuckPage onComplete={handleComplete} />;
       default:
